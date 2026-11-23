@@ -8,6 +8,8 @@ on:
     paths:
       - ".gitmodules"
       - "docs/LOCALSEND_INTEGRATION.md"
+      - "native/localsend/**"
+      - "app/src/main/java/app/orchard/tv/localsend/**"
       - ".github/workflows/localsend-android-core.yml"
   pull_request:
     paths:

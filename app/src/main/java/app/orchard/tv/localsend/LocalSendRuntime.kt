@@ -5,24 +5,19 @@ import android.net.wifi.WifiManager
 import org.json.JSONObject
 
 /**
- * Owns the persistent LocalSend device identity and Android's Wi-Fi multicast
- * receive lock. Call acquireMulticast() while discovery is active and always
- * release it when discovery stops.
- *
- * The private key is kept only in app-private SharedPreferences. Never log the
- * returned JSON or the private key.
+ * Owns LocalSend's persistent device identity and multicast discovery lifetime.
+ * The private key is stored only in app-private preferences and is never logged.
  */
 internal class LocalSendRuntime(context: Context) {
     private val appContext = context.applicationContext
-    private val preferences = appContext.getSharedPreferences(
-        PREFS_NAME,
-        Context.MODE_PRIVATE
-    )
-    private val wifiManager = appContext.applicationContext
-        .getSystemService(Context.WIFI_SERVICE) as WifiManager
+    private val preferences = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val wifiManager = appContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
 
     @Volatile
     private var multicastLock: WifiManager.MulticastLock? = null
+
+    @Volatile
+    private var discoverySessionId: String? = null
 
     data class Identity(
         val privateKeyPem: String,
@@ -47,10 +42,8 @@ internal class LocalSendRuntime(context: Context) {
         }
 
         val generated = JSONObject(LocalSendNative.generateSecurityContext())
-        if (generated.has("error")) {
-            throw IllegalStateException(
-                "LocalSend identity generation failed: ${generated.optString("error")}"
-            )
+        check(!generated.has("error")) {
+            "LocalSend identity generation failed: ${generated.optString("error")}"
         }
 
         val identity = Identity(
@@ -70,6 +63,51 @@ internal class LocalSendRuntime(context: Context) {
         ) { "Could not persist LocalSend device identity" }
 
         return identity
+    }
+
+    @Synchronized
+    fun startDiscovery(alias: String = "Aerial TV"): String {
+        discoverySessionId?.let { return it }
+        acquireMulticast()
+
+        return try {
+            val identity = getOrCreateIdentity()
+            val result = JSONObject(
+                LocalSendNative.startDiscovery(
+                    alias,
+                    identity.certificatePem,
+                    identity.privateKeyPem,
+                    identity.fingerprint
+                )
+            )
+            check(!result.has("error")) {
+                "LocalSend discovery failed: ${result.optString("error")}"
+            }
+            result.getString("sessionId").also { discoverySessionId = it }
+        } catch (error: Throwable) {
+            releaseMulticast()
+            throw error
+        }
+    }
+
+    fun getDiscoveredDevices(): JSONObject {
+        val session = discoverySessionId
+            ?: return JSONObject().put("devices", org.json.JSONArray())
+        return JSONObject(LocalSendNative.getDiscoveredDevices(session))
+    }
+
+    @Synchronized
+    fun stopDiscovery() {
+        val session = discoverySessionId ?: run {
+            releaseMulticast()
+            return
+        }
+        discoverySessionId = null
+        try {
+            LocalSendNative.stopDiscovery(session)
+        } finally {
+            releaseMulticast()
+        }
     }
 
     @Synchronized

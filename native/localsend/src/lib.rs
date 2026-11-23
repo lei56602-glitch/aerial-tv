@@ -135,7 +135,7 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_startDiscov
 
     let (alias, certificate, private_key, fingerprint) = match inputs {
         Ok(values) => values,
-        Err(error) => return_json(&mut env, json!({ "error": error })),
+        Err(error) => return return_json(&mut env, json!({ "error": error })),
     };
 
     let session_id = NEXT_SESSION.fetch_add(1, Ordering::Relaxed).to_string();

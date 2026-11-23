@@ -1,0 +1,48 @@
+name: LocalSend Android core
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/localsend-integration
+    paths:
+      - ".gitmodules"
+      - "docs/LOCALSEND_INTEGRATION.md"
+      - ".github/workflows/localsend-android-core.yml"
+  pull_request:
+    paths:
+      - ".gitmodules"
+      - "docs/LOCALSEND_INTEGRATION.md"
+      - ".github/workflows/localsend-android-core.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-rust-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout Aerial and pinned LocalSend source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Android SDK and NDK
+        uses: android-actions/setup-android@v3
+      - name: Install pinned NDK
+        run: sdkmanager "ndk;27.2.12479018"
+
+      - name: Set up Rust and Android target
+        uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          targets: aarch64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Build LocalSend full protocol core for Android API 21
+        working-directory: third_party/localsend/packages/core
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
+        run: cargo ndk -t arm64-v8a --platform 21 build --release --features full

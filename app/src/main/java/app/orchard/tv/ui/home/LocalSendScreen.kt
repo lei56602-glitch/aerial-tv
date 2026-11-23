@@ -189,7 +189,7 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                             val fileId = event.optString("fileId")
                             val item = event.optJSONObject("file") ?: JSONObject()
                             val rawName = item.optString("fileName", item.optString("file_name", "received_file"))
-                            val candidateName = rawName.substringAfterLast('/').substringAfterLast('\\\\')
+                            val candidateName = rawName.substringAfterLast('/').substringAfterLast('\\')
                                 .filter { it.isLetterOrDigit() || it in " ._-()" }.trim()
                             // Never let dot-path names escape the receive directory.
                             val safeName = candidateName.takeUnless { it.isBlank() || it == "." || it == ".." }

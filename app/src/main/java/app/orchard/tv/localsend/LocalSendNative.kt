@@ -1,10 +1,10 @@
 package app.orchard.tv.localsend
 
 /**
- * Private JNI entry point for the embedded LocalSend protocol engine.
+ * JNI boundary to the pinned LocalSend Rust core.
  *
- * Keep all private-key material inside the app process and persist it only in
- * Aerial's app-private storage. Never include it in diagnostics or logs.
+ * Methods exchange versioned JSON strings so the Kotlin UI layer does not
+ * depend on Rust data-layout details.
  */
 internal object LocalSendNative {
     init {
@@ -12,4 +12,15 @@ internal object LocalSendNative {
     }
 
     external fun generateSecurityContext(): String
+
+    external fun startDiscovery(
+        alias: String,
+        certificate: String,
+        privateKey: String,
+        fingerprint: String
+    ): String
+
+    external fun getDiscoveredDevices(sessionId: String): String
+
+    external fun stopDiscovery(sessionId: String): String
 }

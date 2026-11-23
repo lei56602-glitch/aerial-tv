@@ -1,5 +1,5 @@
 use jni::objects::{JClass, JString};
-use jni::sys::{jint, jboolean, jstring};
+use jni::sys::{jint, jboolean, jlong, jstring};
 use jni::JNIEnv;
 use localsend::discovery::{self, ChannelStatus, DeviceChannel, DeviceIdentity, DiscoveryConfig, DiscoveryEvent};
 use localsend::http::server::{self, ServerConfigV2, TlsConfig};
@@ -847,6 +847,9 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_startSendFi
                         return Err("File-descriptor transfer is supported only on Android".to_string());
                     };
 
+                    let progress_events = events.clone();
+                    let progress_session = transfer_session.clone();
+                    let progress_file_id = file_id.clone();
                     client.upload(
                         protocol,
                         &peer_host,
@@ -856,14 +859,11 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_startSendFi
                         &file_id,
                         &token,
                         content,
-                        {
-                            let events = events.clone();
-                            move |bytes| {
-                                events.lock().unwrap().push_back(json!({
-                                    "type": "sendProgress", "sessionId": transfer_session,
-                                    "fileId": file_id, "bytesSent": bytes
-                                }));
-                            }
+                        move |bytes| {
+                            progress_events.lock().unwrap().push_back(json!({
+                                "type": "sendProgress", "sessionId": progress_session,
+                                "fileId": progress_file_id, "bytesSent": bytes
+                            }));
                         },
                         cancel.clone(),
                     ).await.map_err(|error| error.to_string())?;

@@ -637,40 +637,31 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_acceptFileU
                     if let Some(events) = events {
                         let event_session = transfer_session_id.clone();
                         let event_file = file_id.clone();
-                        tokio::spawn(async move {
-                            let mut last_bytes = 0u64;
-                            loop {
-                                tokio::select! {
-                                    progress = progress_rx.recv() => {
-                                        match progress {
-                                            Some(bytes) => {
-                                                last_bytes = bytes;
-                                                events.lock().unwrap().push_back(json!({
-                                                    "type": "fileUploadProgress",
-                                                    "sessionId": event_session,
-                                                    "fileId": event_file,
-                                                    "bytesReceived": bytes
-                                                }));
-                                            }
-                                            None => break,
-                                        }
-                                    }
-                                    result = result_rx => {
-                                        let value = match result {
-                                            Ok(Ok(())) => json!({"type": "fileUploadComplete", "success": true}),
-                                            Ok(Err(error)) => json!({"type": "fileUploadComplete", "success": false, "error": error}),
-                                            Err(_) => json!({"type": "fileUploadComplete", "success": false, "error": "Upload result channel closed"}),
-                                        };
-                                        let mut value = value;
-                                        value["sessionId"] = json!(event_session);
-                                        value["fileId"] = json!(event_file);
-                                        value["bytesReceived"] = json!(last_bytes);
-                                        events.lock().unwrap().push_back(value);
-                                        break;
-                                    }
+                        std::thread::Builder::new()
+                            .name("aerial-localsend-upload-progress".to_string())
+                            .spawn(move || {
+                                let mut last_bytes = 0u64;
+                                while let Some(bytes) = progress_rx.blocking_recv() {
+                                    last_bytes = bytes;
+                                    events.lock().unwrap().push_back(json!({
+                                        "type": "fileUploadProgress",
+                                        "sessionId": event_session,
+                                        "fileId": event_file,
+                                        "bytesReceived": bytes
+                                    }));
                                 }
-                            }
-                        });
+                                let result = result_rx.blocking_recv();
+                                let mut value = match result {
+                                    Ok(Ok(())) => json!({"type": "fileUploadComplete", "success": true}),
+                                    Ok(Err(error)) => json!({"type": "fileUploadComplete", "success": false, "error": error}),
+                                    Err(_) => json!({"type": "fileUploadComplete", "success": false, "error": "Upload result channel closed"}),
+                                };
+                                value["sessionId"] = json!(event_session);
+                                value["fileId"] = json!(event_file);
+                                value["bytesReceived"] = json!(last_bytes);
+                                events.lock().unwrap().push_back(value);
+                            })
+                            .ok();
                     }
                     return_json(&mut env, json!({"ok": true}))
                 }

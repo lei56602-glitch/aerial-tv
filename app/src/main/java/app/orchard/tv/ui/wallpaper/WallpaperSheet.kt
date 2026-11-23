@@ -132,6 +132,7 @@ fun WallpaperSheet(
     homeStatus: HomeStatus,
     /** Control Center's update page, for a new version. */
     onUpdate: () -> Unit,
+    onLocalSend: () -> Unit,
     /** The sheet is all the way in (true) or not: Home need not draw under it then ([SheetCovers]). */
     onSettled: (Boolean) -> Unit = {},
     /** Draw the closed sheet once, nearly clear, so that its first opening is not its first draw (HomeScreen). */
@@ -307,6 +308,13 @@ fun WallpaperSheet(
                         listOf(Effects.Auto to R.string.st_effects_auto, Effects.Full to R.string.st_effects_full, Effects.Lite to R.string.st_effects_lite),
                         AerialSettings.effects, AerialSettings::chooseEffects,
                     )
+                }
+
+                Spacer(Modifier.height(10.dp))
+                Group(stringResource(R.string.localsend_hint)) { note ->
+                    SettingRow(R.string.localsend_title, stringResource(R.string.localsend_hint), note, first = true) {
+                        ActionChip(stringResource(R.string.localsend_open), Glyph.ChevronRight, onLocalSend)
+                    }
                 }
 
                 Spacer(Modifier.height(22.dp))

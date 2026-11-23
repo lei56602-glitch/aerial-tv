@@ -1036,7 +1036,6 @@ class MainActivity : ComponentActivity() {
         restartIdleTimer()
         GuardSetup.setHomeInFront(this, true)
         HomeGuardService.onAerialResumed(this)
-        Updates.onHomeResumed()
         vm.refreshSystem()
         if (!resumedInProcess) {
             resumedInProcess = true
@@ -1075,7 +1074,6 @@ class MainActivity : ComponentActivity() {
         if (minuteReceiverOn) { runCatching { unregisterReceiver(minuteReceiver) }; minuteReceiverOn = false }
         KidsWatch.homeInFront = false
         Weather.whileShown(false)
-        Updates.onHomePaused()
         DiagLog.i("onPause")
         leftForAnApp = openedAppSinceHome
         GuardSetup.setHomeInFront(this, false)

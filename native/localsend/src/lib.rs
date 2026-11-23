@@ -135,7 +135,7 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_startDiscov
 
     let (alias, certificate, private_key, fingerprint) = match inputs {
         Ok(values) => values,
-        Err(error) => return return_json(&mut env, json!({ "error": error })),
+        Err(error) => return_json(&mut env, json!({ "error": error })),
     };
 
     let session_id = NEXT_SESSION.fetch_add(1, Ordering::Relaxed).to_string();
@@ -246,7 +246,7 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_getDiscover
 ) -> jstring {
     let session_id = match java_string(&mut env, session) {
         Ok(value) => value,
-        Err(error) => return_json(&mut env, json!({ "error": error })),
+        Err(error) => return return_json(&mut env, json!({ "error": error })),
     };
 
     let value = sessions()
@@ -271,7 +271,7 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_stopDiscove
 ) -> jstring {
     let session_id = match java_string(&mut env, session) {
         Ok(value) => value,
-        Err(error) => return_json(&mut env, json!({ "error": error })),
+        Err(error) => return return_json(&mut env, json!({ "error": error })),
     };
 
     let entry = sessions().lock().unwrap().remove(&session_id);
@@ -294,8 +294,8 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_announceDis
 
 #[no_mangle]
 pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_probeDevice(mut env: JNIEnv, _class: JClass, session: JString, host: JString, port: jint, https: jboolean) -> jstring {
-    let session_id = match java_string(&mut env, session) { Ok(v) => v, Err(e) => return_json(&mut env, json!({"error": e})) };
-    let host = match java_string(&mut env, host) { Ok(v) => v, Err(e) => return_json(&mut env, json!({"error": e})) };
+    let session_id = match java_string(&mut env, session) { Ok(v) => v, Err(e) => return return_json(&mut env, json!({"error": e})) };
+    let host = match java_string(&mut env, host) { Ok(v) => v, Err(e) => return return_json(&mut env, json!({"error": e})) };
     if !(1..=65535).contains(&port) { return return_json(&mut env, json!({"error": "Port must be between 1 and 65535"})); }
     let queued = sessions().lock().unwrap().get(&session_id).map(|s| s.commands.send(DiscoveryCommand::Probe { host, port: port as u16, https: https != 0 }).is_ok()).unwrap_or(false);
     return_json(&mut env, json!({"queued": queued}))

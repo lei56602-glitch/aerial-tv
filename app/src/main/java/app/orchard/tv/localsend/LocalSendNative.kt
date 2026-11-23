@@ -2,9 +2,7 @@ package app.orchard.tv.localsend
 
 /**
  * JNI boundary to the pinned LocalSend Rust core.
- *
- * Methods exchange versioned JSON strings so the Kotlin UI layer does not
- * depend on Rust data-layout details.
+ * Methods exchange versioned JSON strings rather than Rust data layouts.
  */
 internal object LocalSendNative {
     init {
@@ -21,6 +19,15 @@ internal object LocalSendNative {
     ): String
 
     external fun getDiscoveredDevices(sessionId: String): String
+
+    external fun announceDiscovery(sessionId: String): String
+
+    external fun probeDevice(
+        sessionId: String,
+        host: String,
+        port: Int,
+        https: Boolean
+    ): String
 
     external fun stopDiscovery(sessionId: String): String
 }

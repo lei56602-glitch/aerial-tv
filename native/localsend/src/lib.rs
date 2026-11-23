@@ -431,6 +431,10 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_startHttpSe
                 if let Some(session) = http_servers().lock().unwrap().get_mut(&thread_session_id) {
                     session.stop = Some(stop_tx);
                     session.port = bound_port;
+                    // A caller may have timed out while the listener was binding.
+                    if session.stopping.load(Ordering::Acquire) {
+                        if let Some(stop) = session.stop.take() { let _ = stop.send(()); }
+                    }
                 }
                 let _ = startup_tx.send(Ok(bound_port));
 
@@ -465,6 +469,8 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_startHttpSe
                                     }));
                                 }
                                 ServerEventV2::SessionEnd { session_id, reason } => {
+                                    pending_decisions.lock().unwrap().remove(&session_id);
+                                    pending_uploads.lock().unwrap().retain(|(sid, _), _| sid != &session_id);
                                     events.lock().unwrap().push_back(json!({
                                         "type": "sessionEnd", "sessionId": session_id,
                                         "reason": format!("{:?}", reason)

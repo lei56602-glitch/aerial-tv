@@ -14,6 +14,7 @@ use tokio::sync::{mpsc, oneshot};
 
 enum DiscoveryCommand {
     Announce,
+    SetAnswering(bool),
     Probe { host: String, port: u16, https: bool },
 }
 
@@ -198,6 +199,8 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_startDiscov
                 };
 
                 let handle = discovery::start(config, stop_rx).await;
+                // Do not invite peers to send files until Aerial's HTTP receive server is running.
+                handle.set_answer_announcements(false);
                 let mut refresh = tokio::time::interval(Duration::from_millis(750));
 
                 loop {
@@ -217,6 +220,7 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_startDiscov
                         command = command_rx.recv() => {
                             match command {
                                 Some(DiscoveryCommand::Announce) => handle.announce().await,
+                                Some(DiscoveryCommand::SetAnswering(enabled)) => handle.set_answer_announcements(enabled),
                                 Some(DiscoveryCommand::Probe { host, port, https }) => {
                                     let protocol = if https { ProtocolType::Https } else { ProtocolType::Http };
                                     let _ = handle.discover(&host, port, protocol).await;
@@ -298,5 +302,12 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_probeDevice
     let host = match java_string(&mut env, host) { Ok(v) => v, Err(e) => return return_json(&mut env, json!({"error": e})) };
     if !(1..=65535).contains(&port) { return return_json(&mut env, json!({"error": "Port must be between 1 and 65535"})); }
     let queued = sessions().lock().unwrap().get(&session_id).map(|s| s.commands.send(DiscoveryCommand::Probe { host, port: port as u16, https: https != 0 }).is_ok()).unwrap_or(false);
+    return_json(&mut env, json!({"queued": queued}))
+}
+
+#[no_mangle]
+pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_setAnswerAnnouncements(mut env: JNIEnv, _class: JClass, session: JString, enabled: jboolean) -> jstring {
+    let session_id = match java_string(&mut env, session) { Ok(v) => v, Err(e) => return return_json(&mut env, json!({"error": e})) };
+    let queued = sessions().lock().unwrap().get(&session_id).map(|s| s.commands.send(DiscoveryCommand::SetAnswering(enabled != 0)).is_ok()).unwrap_or(false);
     return_json(&mut env, json!({"queued": queued}))
 }

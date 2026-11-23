@@ -88,6 +88,7 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                     }
                     val descriptor = context.contentResolver.openFileDescriptor(uri, "r")
                         ?: error("无法打开所选文件")
+                    if (size <= 0L && descriptor.statSize > 0L) size = descriptor.statSize
                     Triple(name, size, descriptor)
                 }
                 val fd = metadata.third.detachFd()

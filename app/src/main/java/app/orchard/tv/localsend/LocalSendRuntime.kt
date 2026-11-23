@@ -183,6 +183,93 @@ internal class LocalSendRuntime(context: Context) {
         }
     }
 
+    @Volatile
+    private var httpServerSessionId: String? = null
+
+    @Volatile
+    private var httpServerPort: Int? = null
+
+    /** Starts the LocalSend HTTPS/mTLS receiver and advertises it to LAN peers. */
+    @Synchronized
+    fun startHttpServer(alias: String = "Aerial TV", port: Int = 53317): Int {
+        httpServerPort?.let { return it }
+        require(port in 0..65535) { "Port must be between 0 and 65535" }
+        val identity = getOrCreateIdentity()
+        val result = JSONObject(
+            LocalSendNative.startHttpServer(
+                alias,
+                identity.certificatePem,
+                identity.privateKeyPem,
+                identity.fingerprint,
+                port
+            )
+        )
+        check(!result.has("error")) {
+            "LocalSend HTTP server failed: ${result.optString("error")}"
+        }
+        val session = result.getString("sessionId")
+        val boundPort = result.getInt("port")
+        httpServerSessionId = session
+        httpServerPort = boundPort
+        if (discoverySessionId != null) {
+            setReceiveServerReady(true)
+            announcePresence()
+        }
+        return boundPort
+    }
+
+    /** Returns pending registration, upload, cancellation and session events. */
+    @Synchronized
+    fun pollHttpServerEvents(): JSONArray {
+        val session = httpServerSessionId ?: return JSONArray()
+        val result = JSONObject(LocalSendNative.pollHttpServerEvents(session))
+        check(!result.has("error")) { result.optString("error") }
+        return result.optJSONArray("events") ?: JSONArray()
+    }
+
+    @Synchronized
+    fun respondToIncomingFiles(
+        transferSessionId: String,
+        acceptedFileIds: List<String>?
+    ) {
+        val serverSession = checkNotNull(httpServerSessionId) { "LocalSend receiver is not running" }
+        val acceptedJson = acceptedFileIds?.let { ids ->
+            JSONArray().apply { ids.forEach(::put) }.toString()
+        } ?: "null"
+        val result = JSONObject(
+            LocalSendNative.respondPrepareUpload(serverSession, transferSessionId, acceptedJson)
+        )
+        check(!result.has("error")) { result.optString("error") }
+    }
+
+    @Synchronized
+    fun acceptIncomingFile(
+        transferSessionId: String,
+        fileId: String,
+        destinationPath: String
+    ) {
+        require(destinationPath.isNotBlank()) { "Destination path cannot be empty" }
+        val serverSession = checkNotNull(httpServerSessionId) { "LocalSend receiver is not running" }
+        val result = JSONObject(
+            LocalSendNative.acceptFileUpload(
+                serverSession,
+                transferSessionId,
+                fileId,
+                destinationPath
+            )
+        )
+        check(!result.has("error")) { result.optString("error") }
+    }
+
+    @Synchronized
+    fun stopHttpServer() {
+        val session = httpServerSessionId ?: return
+        if (discoverySessionId != null) setReceiveServerReady(false)
+        httpServerSessionId = null
+        httpServerPort = null
+        LocalSendNative.stopHttpServer(session)
+    }
+
     @Synchronized
     fun acquireMulticast() {
         if (multicastLock?.isHeld == true) return

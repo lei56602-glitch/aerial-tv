@@ -20,9 +20,12 @@ if [[ $# -gt 0 ]]; then
   ABIS=("$@")
 fi
 
-cargo ndk \
-  "${ABIS[@]/#/-t }" \
-  --platform 21 \
+NDK_ARGS=()
+for abi in "${ABIS[@]}"; do
+  NDK_ARGS+=(-t "$abi")
+done
+
+cargo ndk "${NDK_ARGS[@]}" --platform 21 \
   -o app/src/main/jniLibs \
   build --release --manifest-path native/localsend/Cargo.toml
 

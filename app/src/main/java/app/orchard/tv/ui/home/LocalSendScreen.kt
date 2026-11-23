@@ -3,10 +3,12 @@ package app.orchard.tv.ui.home
 import android.provider.OpenableColumns
 import android.os.Environment
 import android.os.ParcelFileDescriptor
+import android.graphics.Bitmap
 import java.io.File
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,6 +53,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
+import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 
 private data class IncomingLocalFile(val id: String, val name: String, val size: Long)
 private data class IncomingLocalRequest(val sessionId: String, val sender: String, val files: List<IncomingLocalFile>)
@@ -332,6 +339,7 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
             if (lastEvent.isNotBlank()) {
                 BasicText(lastEvent, style = Type.Caption.copy(color = Color(0xFF9FB4C9)), maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
+            LocalSendInstallQrCard()
         }
     }
 }
@@ -350,6 +358,79 @@ private fun LocalSendAction(label: String, enabled: Boolean = true, onClick: () 
             contentAlignment = Alignment.Center,
         ) {
             BasicText(label, style = Type.Body.copy(color = foreground), maxLines = 1)
+        }
+    }
+}
+
+
+/** Official cross-platform download entry; avoids hard-coding one phone CPU architecture. */
+@Composable
+private fun LocalSendInstallQrCard() {
+    val qrBitmap = remember {
+        val matrix = QRCodeWriter().encode(
+            "https://localsend.org/",
+            BarcodeFormat.QR_CODE,
+            280,
+            280,
+            mapOf(
+                EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
+                EncodeHintType.MARGIN to 2,
+            ),
+        )
+        val pixels = IntArray(280 * 280)
+        for (y in 0 until 280) {
+            for (x in 0 until 280) {
+                pixels[y * 280 + x] = if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+            }
+        }
+        Bitmap.createBitmap(280, 280, Bitmap.Config.ARGB_8888).apply {
+            setPixels(pixels, 0, 280, 0, 0, 280, 280)
+        }
+    }
+
+    Row(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xFF172F49))
+            .padding(18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(22.dp),
+    ) {
+        Image(
+            bitmap = qrBitmap.asImageBitmap(),
+            contentDescription = "LocalSend 官方下载二维码",
+            modifier = Modifier.width(150.dp).height(150.dp)
+                .clip(RoundedCornerShape(8.dp)),
+        )
+        Column(
+            Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(7.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(
+                    Modifier.width(34.dp).height(34.dp)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(Color(0xFF2878D0)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    BasicText("↔", style = Type.Headline.copy(color = Color.White))
+                }
+                BasicText("手机扫码安装 LocalSend", style = Type.Headline.copy(color = Color.White))
+            }
+            BasicText(
+                "免费 · 开源 · 局域网传输",
+                style = Type.Body.copy(color = Color(0xFF8FC7FF)),
+            )
+            BasicText(
+                "手机安装后，与电视连接同一 Wi-Fi，即可互相传输文件。",
+                style = Type.Body.copy(color = Color(0xFFD0DCE8)),
+                maxLines = 2,
+            )
+            BasicText(
+                "二维码打开 LocalSend 官方下载页，可选择 Android、iOS 等对应版本。",
+                style = Type.Caption.copy(color = Color(0xFF9FB4C9)),
+                maxLines = 2,
+            )
         }
     }
 }

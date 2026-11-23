@@ -101,7 +101,13 @@ internal class LocalSendRuntime(context: Context) {
             check(!result.has("error")) {
                 "LocalSend discovery failed: ${result.optString("error")}"
             }
-            result.getString("sessionId").also { discoverySessionId = it }
+            result.getString("sessionId").also {
+                discoverySessionId = it
+                if (httpServerSessionId != null) {
+                    setReceiveServerReady(true)
+                    announcePresence()
+                }
+            }
         } catch (error: Throwable) {
             releaseMulticast()
             throw error
@@ -259,6 +265,62 @@ internal class LocalSendRuntime(context: Context) {
             )
         )
         check(!result.has("error")) { result.optString("error") }
+    }
+
+    /**
+     * Starts sending one SAF-opened file descriptor to a discovered LocalSend peer.
+     * The caller must pass a detached descriptor; native LocalSend takes ownership.
+     */
+    @Synchronized
+    fun startSendFile(
+        peer: LocalSendPeer,
+        channel: LocalSendPeerChannel,
+        fileDescriptor: Int,
+        fileName: String,
+        fileSize: Long,
+        fileType: String
+    ): String {
+        require(fileDescriptor >= 0) { "Invalid file descriptor" }
+        require(fileName.isNotBlank()) { "File name cannot be empty" }
+        require(fileSize >= 0L) { "File size cannot be negative" }
+        val localPort = httpServerPort
+            ?: startHttpServer()
+        val identity = getOrCreateIdentity()
+        val result = JSONObject(
+            LocalSendNative.startSendFile(
+                "Aerial TV",
+                identity.certificatePem,
+                identity.privateKeyPem,
+                identity.fingerprint,
+                channel.host,
+                channel.port,
+                peer.fingerprint,
+                localPort,
+                fileDescriptor,
+                fileName,
+                fileSize,
+                fileType.ifBlank { "application/octet-stream" }
+            )
+        )
+        check(!result.has("error")) { result.optString("error") }
+        return result.getString("sessionId")
+    }
+
+    @Synchronized
+    fun pollSendEvents(sessionId: String): JSONArray {
+        val result = JSONObject(LocalSendNative.pollSendEvents(sessionId))
+        check(!result.has("error")) { result.optString("error") }
+        return result.optJSONArray("events") ?: JSONArray()
+    }
+
+    @Synchronized
+    fun cancelSend(sessionId: String): Boolean {
+        return JSONObject(LocalSendNative.cancelSend(sessionId)).optBoolean("cancelled")
+    }
+
+    @Synchronized
+    fun releaseSend(sessionId: String): Boolean {
+        return JSONObject(LocalSendNative.releaseSend(sessionId)).optBoolean("released")
     }
 
     @Synchronized

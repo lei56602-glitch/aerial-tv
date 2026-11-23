@@ -7,7 +7,6 @@ use localsend::multicast::{DEFAULT_MULTICAST_GROUP, DEFAULT_MULTICAST_GROUP_V6, 
 use localsend::util::interface::InterfaceFilter;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::net::Ipv4Addr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -136,7 +135,7 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_startDiscov
 
     let (alias, certificate, private_key, fingerprint) = match inputs {
         Ok(values) => values,
-        Err(error) => return_json(&mut env, json!({ "error": error })),
+        Err(error) => return return_json(&mut env, json!({ "error": error })),
     };
 
     let session_id = NEXT_SESSION.fetch_add(1, Ordering::Relaxed).to_string();
@@ -288,7 +287,7 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_stopDiscove
 
 #[no_mangle]
 pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_announceDiscovery(mut env: JNIEnv, _class: JClass, session: JString) -> jstring {
-    let session_id = match java_string(&mut env, session) { Ok(v) => v, Err(e) => return_json(&mut env, json!({"error": e})) };
+    let session_id = match java_string(&mut env, session) { Ok(v) => v, Err(e) => return return_json(&mut env, json!({"error": e})) };
     let queued = sessions().lock().unwrap().get(&session_id).map(|s| s.commands.send(DiscoveryCommand::Announce).is_ok()).unwrap_or(false);
     return_json(&mut env, json!({"queued": queued}))
 }

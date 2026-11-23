@@ -75,6 +75,9 @@
     <string name="cc_brightness_in_settings">Picture Settings</string>
     <string name="cc_personalize">Personalize</string>
     <string name="wp_title">Personalize</string>
+    <string name="localsend_title">LocalSend 文件传输</string>
+    <string name="localsend_open">打开</string>
+    <string name="localsend_hint">在同一局域网内与手机、电脑或其他 LocalSend 设备互传文件。</string>
     <string name="wp_wallpaper">Wallpaper</string>
     <string name="wp_weather">Weather</string>
     <string name="wp_weather_none">No weather yet. It loads once the TV is online.</string>

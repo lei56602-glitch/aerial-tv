@@ -1,0 +1,13 @@
+[package]
+name = "aerial_localsend"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+jni = "0.21.1"
+localsend = { path = "../../third_party/localsend/packages/core", features = ["full"] }
+serde_json = "1.0.151"

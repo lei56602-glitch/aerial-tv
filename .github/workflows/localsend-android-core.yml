@@ -45,13 +45,13 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
 
-      - name: Build LocalSend JNI bridge and full protocol core for Android API 21
-        run: cargo ndk -t arm64-v8a --platform 21 build --release --manifest-path native/localsend/Cargo.toml
+      - name: Build and stage LocalSend JNI library for Android API 21
+        run: bash native/localsend/build-android.sh arm64-v8a
 
-      - name: Upload native bridge smoke-test library
+      - name: Upload staged Android JNI library
         uses: actions/upload-artifact@v4
         with:
           name: aerial-localsend-arm64-api21
-          path: native/localsend/target/aarch64-linux-android/release/libaerial_localsend.so
+          path: app/src/main/jniLibs/arm64-v8a/libaerial_localsend.so
           if-no-files-found: error
           retention-days: 14

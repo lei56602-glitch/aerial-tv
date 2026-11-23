@@ -1,6 +1,5 @@
 package app.orchard.tv.ui.home
 
-import android.content.Intent
 import android.provider.OpenableColumns
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -40,6 +39,7 @@ import app.orchard.tv.ui.components.Pressable
 import app.orchard.tv.ui.theme.Palette
 import app.orchard.tv.ui.theme.Type
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -136,7 +136,7 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
         } catch (error: Throwable) {
             status = "LocalSend 启动失败：${error.message ?: "请检查网络"}"
         } finally {
-            withContext(Dispatchers.IO) {
+            withContext(NonCancellable + Dispatchers.IO) {
                 activeTransferSession?.let { runCatching { runtime.cancelSend(it); runtime.releaseSend(it) } }
                 runCatching { runtime.stopDiscovery() }
                 runCatching { runtime.stopHttpServer() }

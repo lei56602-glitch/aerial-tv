@@ -58,6 +58,7 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
     var transferSession by remember { mutableStateOf<String?>(null) }
     var transferText by remember { mutableStateOf("尚未发送文件") }
     var lastEvent by remember { mutableStateOf("") }
+    var transferFileSize by remember { mutableStateOf(0L) }
     val activeTransferSession by rememberUpdatedState(transferSession)
 
     BackHandler(onBack = onDismiss)
@@ -90,6 +91,7 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                         context.contentResolver.getType(uri) ?: "application/octet-stream",
                     )
                 }
+                transferFileSize = metadata.second
                 transferSession = session
                 transferText = "正在发送：${metadata.first}"
                 status = "已连接到 ${target.first.alias}"
@@ -116,18 +118,14 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                         val event = snapshot.second.optJSONObject(index) ?: continue
                         lastEvent = event.toString()
                         val kind = event.optString("type", event.optString("event"))
-                        val progress = event.opt("progress")
-                        if (progress is Number) {
-                            val value = progress.toDouble()
-                            transferText = "传输进度：${(if (value <= 1.0) value * 100 else value).toInt().coerceIn(0, 100)}%"
+                        val sent = event.optLong("bytesSent", -1L)
+                        if (kind == "sendProgress" && sent >= 0L) {
+                            val percent = if (transferFileSize > 0L) (sent * 100L / transferFileSize).coerceIn(0L, 100L) else 0L
+                            transferText = "传输进度：$percent%（$sent / $transferFileSize 字节）"
                         }
-                        if (kind.contains("complete", true) || kind.contains("finish", true)) {
-                            transferText = "文件发送完成"
-                            activeTransferSession?.let { id -> withContext(Dispatchers.IO) { runtime.releaseSend(id) } }
-                            transferSession = null
-                        }
-                        if (kind.contains("error", true)) {
-                            transferText = "发送失败：${event.optString("message", event.optString("error"))}"
+                        if (kind == "sendComplete") {
+                            transferText = if (event.optBoolean("success")) "文件发送完成" else
+                                "发送失败：${event.optString("error", "未知错误")}"
                             activeTransferSession?.let { id -> withContext(Dispatchers.IO) { runtime.releaseSend(id) } }
                             transferSession = null
                         }

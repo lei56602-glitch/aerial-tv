@@ -2,11 +2,17 @@ use jni::objects::{JClass, JString};
 use jni::sys::{jint, jboolean, jstring};
 use jni::JNIEnv;
 use localsend::discovery::{self, ChannelStatus, DeviceChannel, DeviceIdentity, DiscoveryConfig, DiscoveryEvent};
+use localsend::http::server::{self, ServerConfigV2, TlsConfig};
+use localsend::http::server::common::save::FileUploadTarget;
+use localsend::http::server::v2::{PrepareUploadDecisionV2, ServerEventV2};
+use localsend::http::state::ClientInfo;
+use localsend::model::transfer::FileDto;
 use localsend::model::discovery::{DeviceType, ProtocolType, PROTOCOL_VERSION_V2};
 use localsend::multicast::{DEFAULT_MULTICAST_GROUP, DEFAULT_MULTICAST_GROUP_V6, DEFAULT_PORT};
 use localsend::util::interface::InterfaceFilter;
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -23,6 +29,21 @@ struct DiscoverySession {
     stopped: Arc<AtomicBool>,
     snapshot: Arc<Mutex<String>>,
     commands: mpsc::UnboundedSender<DiscoveryCommand>,
+}
+
+struct HttpServerSession {
+    stop: Option<oneshot::Sender<()>>,
+    stopping: Arc<AtomicBool>,
+    events: Arc<Mutex<VecDeque<Value>>>,
+    pending_decisions: Arc<Mutex<HashMap<String, oneshot::Sender<PrepareUploadDecisionV2>>>>,
+    pending_uploads: Arc<Mutex<HashMap<(String, String), oneshot::Sender<FileUploadTarget>>>>,
+    port: u16,
+}
+
+static HTTP_SERVERS: OnceLock<Mutex<HashMap<String, HttpServerSession>>> = OnceLock::new();
+
+fn http_servers() -> &'static Mutex<HashMap<String, HttpServerSession>> {
+    HTTP_SERVERS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
@@ -310,4 +331,314 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_setAnswerAn
     let session_id = match java_string(&mut env, session) { Ok(v) => v, Err(e) => return return_json(&mut env, json!({"error": e})) };
     let queued = sessions().lock().unwrap().get(&session_id).map(|s| s.commands.send(DiscoveryCommand::SetAnswering(enabled != 0)).is_ok()).unwrap_or(false);
     return_json(&mut env, json!({"queued": queued}))
+}
+
+
+/// Starts LocalSend's native HTTPS/mTLS receive server and its v2 event bridge.
+#[no_mangle]
+pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_startHttpServer(
+    mut env: JNIEnv,
+    _class: JClass,
+    alias: JString,
+    certificate: JString,
+    private_key: JString,
+    fingerprint: JString,
+    requested_port: jint,
+) -> jstring {
+    let values = (|| -> Result<(String, String, String, String), String> {
+        Ok((
+            java_string(&mut env, alias)?,
+            java_string(&mut env, certificate)?,
+            java_string(&mut env, private_key)?,
+            java_string(&mut env, fingerprint)?,
+        ))
+    })();
+    let (alias, certificate, private_key, _fingerprint) = match values {
+        Ok(values) => values,
+        Err(error) => return return_json(&mut env, json!({"error": error})),
+    };
+    if !(0..=65535).contains(&requested_port) {
+        return return_json(&mut env, json!({"error": "Port must be between 0 and 65535"}));
+    }
+
+    let session_id = NEXT_SESSION.fetch_add(1, Ordering::Relaxed).to_string();
+    let stopping = Arc::new(AtomicBool::new(false));
+    let events = Arc::new(Mutex::new(VecDeque::new()));
+    let pending_decisions = Arc::new(Mutex::new(HashMap::new()));
+    let pending_uploads = Arc::new(Mutex::new(HashMap::new()));
+    {
+        http_servers().lock().unwrap().insert(
+            session_id.clone(),
+            HttpServerSession {
+                stop: None,
+                stopping: stopping.clone(),
+                events: events.clone(),
+                pending_decisions: pending_decisions.clone(),
+                pending_uploads: pending_uploads.clone(),
+                port: 0,
+            },
+        );
+    }
+
+    let thread_session_id = session_id.clone();
+    let (startup_tx, startup_rx) = std::sync::mpsc::sync_channel::<Result<u16, String>>(1);
+    let spawn_result = std::thread::Builder::new()
+        .name("aerial-localsend-http".to_string())
+        .spawn(move || {
+            let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    let _ = startup_tx.send(Err(error.to_string()));
+                    http_servers().lock().unwrap().remove(&thread_session_id);
+                    return;
+                }
+            };
+
+            runtime.block_on(async move {
+                let (event_tx, mut event_rx) = mpsc::channel::<ServerEventV2>(64);
+                let (stop_tx, stop_rx) = oneshot::channel::<()>();
+                let info = ClientInfo {
+                    alias,
+                    version: PROTOCOL_VERSION_V2.to_string(),
+                    device_model: Some("Android TV".to_string()),
+                    device_type: Some(DeviceType::Desktop),
+                    token: format!("aerial-{}", thread_session_id),
+                };
+                let server = server::start_with_port(
+                    requested_port as u16,
+                    Some(TlsConfig { cert: certificate, private_key }),
+                    info,
+                    None,
+                    Some(ServerConfigV2 {
+                        pin: None,
+                        verify_checksums: true,
+                        event_tx,
+                    }),
+                    None,
+                    stop_rx,
+                ).await;
+
+                let handle = match server {
+                    Ok(handle) => handle,
+                    Err(error) => {
+                        let _ = startup_tx.send(Err(error.to_string()));
+                        http_servers().lock().unwrap().remove(&thread_session_id);
+                        return;
+                    }
+                };
+
+                let bound_port = handle.port();
+                if let Some(session) = http_servers().lock().unwrap().get_mut(&thread_session_id) {
+                    session.stop = Some(stop_tx);
+                    session.port = bound_port;
+                }
+                let _ = startup_tx.send(Ok(bound_port));
+
+                loop {
+                    tokio::select! {
+                        event = event_rx.recv() => {
+                            let Some(event) = event else { break; };
+                            match event {
+                                ServerEventV2::Register { ip, info } => {
+                                    events.lock().unwrap().push_back(json!({
+                                        "type": "register", "ip": ip.to_string(),
+                                        "device": serde_json::to_value(info).unwrap_or(Value::Null)
+                                    }));
+                                }
+                                ServerEventV2::PrepareUpload {
+                                    session_id, ip, info, cert_fingerprint, files, decision_tx
+                                } => {
+                                    pending_decisions.lock().unwrap().insert(session_id.clone(), decision_tx);
+                                    events.lock().unwrap().push_back(json!({
+                                        "type": "prepareUpload", "sessionId": session_id,
+                                        "ip": ip.to_string(),
+                                        "device": serde_json::to_value(info).unwrap_or(Value::Null),
+                                        "certificateFingerprint": cert_fingerprint,
+                                        "files": serde_json::to_value(files).unwrap_or(Value::Null)
+                                    }));
+                                }
+                                ServerEventV2::FileUpload { session_id, file_id, file, target_tx } => {
+                                    pending_uploads.lock().unwrap().insert((session_id.clone(), file_id.clone()), target_tx);
+                                    events.lock().unwrap().push_back(json!({
+                                        "type": "fileUpload", "sessionId": session_id,
+                                        "fileId": file_id, "file": serde_json::to_value(file).unwrap_or(Value::Null)
+                                    }));
+                                }
+                                ServerEventV2::SessionEnd { session_id, reason } => {
+                                    events.lock().unwrap().push_back(json!({
+                                        "type": "sessionEnd", "sessionId": session_id,
+                                        "reason": format!("{:?}", reason)
+                                    }));
+                                }
+                                ServerEventV2::PrepareUploadAborted { session_id } => {
+                                    pending_decisions.lock().unwrap().remove(&session_id);
+                                    events.lock().unwrap().push_back(json!({
+                                        "type": "prepareUploadAborted", "sessionId": session_id
+                                    }));
+                                }
+                                ServerEventV2::CancelReceived { ip, session_id } => {
+                                    events.lock().unwrap().push_back(json!({
+                                        "type": "cancelReceived", "ip": ip.to_string(),
+                                        "sessionId": session_id
+                                    }));
+                                }
+                                ServerEventV2::ListenerFailed { error } => {
+                                    events.lock().unwrap().push_back(json!({
+                                        "type": "listenerFailed", "error": error
+                                    }));
+                                }
+                            }
+                        }
+                        _ = tokio::time::sleep(Duration::from_millis(200)) => {
+                            if stopping.load(Ordering::Acquire) { break; }
+                        }
+                    }
+                }
+
+                handle.wait_stopped().await;
+                http_servers().lock().unwrap().remove(&thread_session_id);
+            });
+        });
+
+    if let Err(error) = spawn_result {
+        http_servers().lock().unwrap().remove(&session_id);
+        return return_json(&mut env, json!({"error": error.to_string()}));
+    }
+
+    match startup_rx.recv_timeout(Duration::from_secs(15)) {
+        Ok(Ok(port)) => return_json(&mut env, json!({"sessionId": session_id, "port": port})),
+        Ok(Err(error)) => return_json(&mut env, json!({"error": error})),
+        Err(error) => {
+            if let Some(session) = http_servers().lock().unwrap().get_mut(&session_id) {
+                session.stopping.store(true, Ordering::Release);
+                if let Some(stop) = session.stop.take() { let _ = stop.send(()); }
+            }
+            return_json(&mut env, json!({"error": format!("HTTP server startup timed out: {error}")}));
+        }
+    }
+}
+
+/// Drains pending LocalSend HTTP server events as a JSON array.
+#[no_mangle]
+pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_pollHttpServerEvents(
+    mut env: JNIEnv, _class: JClass, session: JString
+) -> jstring {
+    let session_id = match java_string(&mut env, session) {
+        Ok(value) => value,
+        Err(error) => return return_json(&mut env, json!({"error": error})),
+    };
+    let events = http_servers().lock().unwrap().get(&session_id)
+        .map(|server| {
+            let mut queue = server.events.lock().unwrap();
+            queue.drain(..).collect::<Vec<_>>()
+        });
+    match events {
+        Some(events) => return_json(&mut env, json!({"events": events})),
+        None => return_json(&mut env, json!({"error": "Unknown HTTP server session"})),
+    }
+}
+
+/// Accepts selected incoming file IDs, or declines when acceptedFileIdsJson is null.
+#[no_mangle]
+pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_respondPrepareUpload(
+    mut env: JNIEnv, _class: JClass, session: JString, accepted_file_ids_json: JString
+) -> jstring {
+    let session_id = match java_string(&mut env, session) {
+        Ok(value) => value,
+        Err(error) => return return_json(&mut env, json!({"error": error})),
+    };
+    let accepted_json = match java_string(&mut env, accepted_file_ids_json) {
+        Ok(value) => value,
+        Err(error) => return return_json(&mut env, json!({"error": error})),
+    };
+    let decision = if accepted_json.trim() == "null" {
+        None
+    } else {
+        match serde_json::from_str::<Vec<String>>(&accepted_json) {
+            Ok(ids) => Some(ids),
+            Err(error) => return return_json(&mut env, json!({"error": error.to_string()})),
+        }
+    };
+
+    let pending = http_servers().lock().unwrap().get(&session_id)
+        .and_then(|server| server.pending_decisions.lock().unwrap().remove(&session_id));
+    match pending {
+        Some(sender) => {
+            let decision = match decision {
+                Some(ids) => PrepareUploadDecisionV2::Accept(ids.into_iter().collect()),
+                None => PrepareUploadDecisionV2::Decline,
+            };
+            match sender.send(decision) {
+                Ok(()) => return_json(&mut env, json!({"ok": true})),
+                Err(_) => return_json(&mut env, json!({"error": "Upload request already ended"})),
+            }
+        }
+        None => return_json(&mut env, json!({"error": "No pending upload decision"})),
+    }
+}
+
+/// Routes an accepted file to an app-selected destination path. LocalSend core
+/// performs the streaming write and SHA-256 verification.
+#[no_mangle]
+pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_acceptFileUpload(
+    mut env: JNIEnv, _class: JClass, session: JString, file_id: JString, destination: JString
+) -> jstring {
+    let session_id = match java_string(&mut env, session) {
+        Ok(value) => value,
+        Err(error) => return return_json(&mut env, json!({"error": error})),
+    };
+    let file_id = match java_string(&mut env, file_id) {
+        Ok(value) => value,
+        Err(error) => return return_json(&mut env, json!({"error": error})),
+    };
+    let destination = match java_string(&mut env, destination) {
+        Ok(value) => value,
+        Err(error) => return return_json(&mut env, json!({"error": error})),
+    };
+    let path = PathBuf::from(destination);
+    if path.file_name().is_none() {
+        return return_json(&mut env, json!({"error": "Destination must include a file name"}));
+    }
+    if let Some(parent) = path.parent() {
+        if let Err(error) = std::fs::create_dir_all(parent) {
+            return return_json(&mut env, json!({"error": error.to_string()}));
+        }
+    }
+
+    let pending = http_servers().lock().unwrap().get(&session_id)
+        .and_then(|server| server.pending_uploads.lock().unwrap().remove(&(session_id.clone(), file_id.clone())));
+    match pending {
+        Some(target_tx) => {
+            let (result_tx, _result_rx) = oneshot::channel::<Result<(), String>>();
+            let target = FileUploadTarget::Path {
+                path,
+                result_tx,
+                progress_tx: None,
+            };
+            match target_tx.send(target) {
+                Ok(()) => return_json(&mut env, json!({"ok": true})),
+                Err(_) => return_json(&mut env, json!({"error": "Upload request already ended"})),
+            }
+        }
+        None => return_json(&mut env, json!({"error": "No pending file upload"})),
+    }
+}
+
+/// Stops the LocalSend HTTPS receive server and releases its listener.
+#[no_mangle]
+pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_stopHttpServer(
+    mut env: JNIEnv, _class: JClass, session: JString
+) -> jstring {
+    let session_id = match java_string(&mut env, session) {
+        Ok(value) => value,
+        Err(error) => return return_json(&mut env, json!({"error": error})),
+    };
+    let stopped = {
+        let mut all = http_servers().lock().unwrap();
+        all.get_mut(&session_id).map(|server| {
+            server.stopping.store(true, Ordering::Release);
+            server.stop.take().map(|stop| stop.send(()).is_ok()).unwrap_or(false)
+        })
+    };
+    return_json(&mut env, json!({"stopping": stopped.unwrap_or(false)}))
 }

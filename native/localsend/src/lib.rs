@@ -3,6 +3,7 @@ use jni::sys::{jint, jboolean, jlong, jstring};
 use jni::JNIEnv;
 use localsend::discovery::{self, ChannelStatus, DeviceChannel, DeviceIdentity, DiscoveryConfig, DiscoveryEvent};
 use localsend::http::server::{self, ServerConfigV2, TlsConfig};
+use localsend::http::server::web::{WebConfig, WebI18n, WebPages};
 use localsend::http::server::common::save::FileUploadTarget;
 use localsend::http::server::v2::{PrepareUploadDecisionV2, ServerEventV2};
 use localsend::http::state::ClientInfo;
@@ -432,7 +433,12 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_startHttpSe
                         verify_checksums: true,
                         event_tx,
                     }),
-                    None,
+                    WebConfig {
+                        send: None,
+                        upload: false,
+                        i18n: WebI18n::default(),
+                        pages: WebPages::default(),
+                    },
                     stop_rx,
                 ).await;
 
@@ -537,7 +543,7 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_startHttpSe
                 session.stopping.store(true, Ordering::Release);
                 if let Some(stop) = session.stop.take() { let _ = stop.send(()); }
             }
-            return_json(&mut env, json!({"error": format!("HTTP server startup timed out: {error}")}));
+            return_json(&mut env, json!({"error": format!("HTTP server startup timed out: {error}")}))
         }
     }
 }
@@ -638,7 +644,7 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_acceptFileU
     }
 
     let pending = http_servers().lock().unwrap().get(&session_id)
-        .and_then(|server| server.pending_uploads.lock().unwrap().remove(&(transfer_session_id, file_id.clone())));
+        .and_then(|server| server.pending_uploads.lock().unwrap().remove(&(transfer_session_id.clone(), file_id.clone())));
     match pending {
         Some(target_tx) => {
             let (result_tx, result_rx) = oneshot::channel::<Result<(), String>>();

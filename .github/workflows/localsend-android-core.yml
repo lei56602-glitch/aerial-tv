@@ -30,7 +30,7 @@ jobs:
       - name: Checkout Aerial and pinned LocalSend source
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: true
 
       - name: Configure Android SDK command line tools
         run: |

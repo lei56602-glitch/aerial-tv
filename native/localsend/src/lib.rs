@@ -162,7 +162,7 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_startDiscov
         .name("aerial-localsend-discovery".to_string())
         .spawn(move || {
             let runtime = match tokio::runtime::Builder::new_multi_thread()
-                .enable_time()
+                .enable_all()
                 .build()
             {
                 Ok(runtime) => runtime,

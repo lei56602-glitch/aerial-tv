@@ -403,8 +403,6 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_startHttpSe
     let spawn_result = std::thread::Builder::new()
         .name("aerial-localsend-http".to_string())
         .spawn(move || {
-            #[cfg(target_os = "android")]
-            let owned_file_descriptor = owned_file_descriptor;
             let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
                 Ok(runtime) => runtime,
                 Err(error) => {
@@ -777,6 +775,8 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_startSendFi
     let spawn = std::thread::Builder::new()
         .name("aerial-localsend-send".to_string())
         .spawn(move || {
+            #[cfg(target_os = "android")]
+            let owned_file_descriptor = owned_file_descriptor;
             let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
                 Ok(runtime) => runtime,
                 Err(error) => {

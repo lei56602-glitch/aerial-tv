@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+# This crate lives under a LocalSend git submodule in some CI checkouts.
+# Give it its own Cargo workspace so it does not inherit the outer repository workspace.
+[workspace]
+
 [lib]
 crate-type = ["cdylib"]
 

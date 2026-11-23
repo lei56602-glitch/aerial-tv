@@ -96,7 +96,6 @@ import app.orchard.tv.system.HomeReopen
 import app.orchard.tv.system.LaunchFallback
 import app.orchard.tv.system.settingsLaunchIntent
 import app.orchard.tv.update.SelfCompile
-import app.orchard.tv.update.Updates
 import app.orchard.tv.weather.Weather
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -140,7 +139,6 @@ class MainActivity : ComponentActivity() {
             vm.refreshNetwork()
             Wallpapers.refreshDailyIfStale(networkCameUp = true)
             Weather.refreshIfStale(networkCameUp = true)
-            Updates.checkIfStale(networkCameUp = true)
         }
         override fun onLost(network: Network) = runOnUiThread { vm.refreshNetwork() }
         override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) = runOnUiThread { vm.refreshNetwork() }
@@ -277,7 +275,6 @@ class MainActivity : ComponentActivity() {
         // A receiver may have started the wallpapers with the app's size; Home's window is the one.
         Wallpapers.fitScreen(this)
         Weather.init(this)
-        Updates.init(this)
         lifecycleScope.launch(Dispatchers.IO) { SelfCompile.init(this@MainActivity) }
         CustomIcons.init(this)
         IconLibrary.init(this)
@@ -1004,7 +1001,6 @@ class MainActivity : ComponentActivity() {
         Wallpapers.refreshDailyIfStale()
         Wallpapers.rotateIfDue()
         Weather.refreshIfStale()
-        Updates.checkIfStale()
     }
 
     override fun onResume() {

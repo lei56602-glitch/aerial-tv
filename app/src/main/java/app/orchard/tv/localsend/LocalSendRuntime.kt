@@ -2,7 +2,25 @@ package app.orchard.tv.localsend
 
 import android.content.Context
 import android.net.wifi.WifiManager
+import org.json.JSONArray
 import org.json.JSONObject
+
+internal data class LocalSendPeerChannel(
+    val host: String,
+    val port: Int,
+    val protocol: String,
+    val status: String
+)
+
+internal data class LocalSendPeer(
+    val alias: String,
+    val version: String,
+    val deviceModel: String?,
+    val deviceType: String?,
+    val fingerprint: String,
+    val downloadAvailable: Boolean,
+    val channels: List<LocalSendPeerChannel>
+)
 
 /**
  * Owns LocalSend's persistent device identity and multicast discovery lifetime.
@@ -90,10 +108,41 @@ internal class LocalSendRuntime(context: Context) {
         }
     }
 
-    fun getDiscoveredDevices(): JSONObject {
-        val session = discoverySessionId
-            ?: return JSONObject().put("devices", org.json.JSONArray())
-        return JSONObject(LocalSendNative.getDiscoveredDevices(session))
+    fun getDiscoveredDevices(): List<LocalSendPeer> {
+        val session = discoverySessionId ?: return emptyList()
+        val root = JSONObject(LocalSendNative.getDiscoveredDevices(session))
+        check(!root.has("error")) { root.optString("error") }
+        val peers = root.optJSONArray("devices") ?: JSONArray()
+        return buildList {
+            for (index in 0 until peers.length()) {
+                val item = peers.optJSONObject(index) ?: continue
+                val channelArray = item.optJSONArray("channels") ?: JSONArray()
+                val channels = buildList {
+                    for (channelIndex in 0 until channelArray.length()) {
+                        val channel = channelArray.optJSONObject(channelIndex) ?: continue
+                        add(
+                            LocalSendPeerChannel(
+                                host = channel.optString("host"),
+                                port = channel.optInt("port"),
+                                protocol = channel.optString("protocol"),
+                                status = channel.optString("status")
+                            )
+                        )
+                    }
+                }
+                add(
+                    LocalSendPeer(
+                        alias = item.optString("alias"),
+                        version = item.optString("version"),
+                        deviceModel = item.optString("deviceModel").takeIf(String::isNotBlank),
+                        deviceType = item.optString("deviceType").takeIf(String::isNotBlank),
+                        fingerprint = item.optString("fingerprint"),
+                        downloadAvailable = item.optBoolean("download"),
+                        channels = channels
+                    )
+                )
+            }
+        }
     }
 
     @Synchronized

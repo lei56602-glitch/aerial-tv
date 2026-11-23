@@ -154,7 +154,7 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    BasicText("小李全联 · 局域网传输", style = Type.LargeTitle.copy(color = Color.White))
+                    BasicText("LocalSend · 局域网传输", style = Type.LargeTitle.copy(color = Color.White))
                     Spacer(Modifier.height(5.dp))
                     BasicText(status, style = Type.Caption.copy(color = Color(0xFFB7C8DA)), maxLines = 2)
                 }

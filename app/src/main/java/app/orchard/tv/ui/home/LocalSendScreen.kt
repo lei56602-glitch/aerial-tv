@@ -2,6 +2,7 @@ package app.orchard.tv.ui.home
 
 import android.provider.OpenableColumns
 import android.os.Environment
+import android.os.ParcelFileDescriptor
 import java.io.File
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -76,6 +77,7 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
             status = "正在读取文件…"
+            var detachedFd = -1
             try {
                 val metadata = withContext(Dispatchers.IO) {
                     var name = uri.lastPathSegment ?: "file"
@@ -93,18 +95,27 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                     if (size <= 0L && descriptor.statSize > 0L) size = descriptor.statSize
                     Triple(name, size, descriptor)
                 }
-                val fd = metadata.third.detachFd()
+                detachedFd = metadata.third.detachFd()
+                metadata.third.close()
                 val session = withContext(Dispatchers.IO) {
                     runtime.startSendFile(
-                        target.first, target.second, fd, metadata.first, metadata.second,
+                        target.first, target.second, detachedFd, metadata.first, metadata.second,
                         context.contentResolver.getType(uri) ?: "application/octet-stream",
-                    )
+                    ).also {
+                        // Rust owns the descriptor once JNI has accepted the send session.
+                        detachedFd = -1
+                    }
                 }
                 transferFileSize = metadata.second
                 transferSession = session
                 transferText = "正在发送：${metadata.first}"
                 status = "已连接到 ${target.first.alias}"
             } catch (error: Throwable) {
+                // If setup failed before JNI took ownership, close the detached descriptor here.
+                if (detachedFd >= 0) {
+                    runCatching { ParcelFileDescriptor.adoptFd(detachedFd).close() }
+                    detachedFd = -1
+                }
                 status = "发送启动失败：${error.message ?: "未知错误"}"
             }
         }
@@ -178,7 +189,11 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                             val fileId = event.optString("fileId")
                             val item = event.optJSONObject("file") ?: JSONObject()
                             val rawName = item.optString("fileName", item.optString("file_name", "received_file"))
-                            val safeName = rawName.substringAfterLast('/').filter { it.isLetterOrDigit() || it in " ._-()" }.trim().ifBlank { "received_file" }
+                            val candidateName = rawName.substringAfterLast('/').substringAfterLast('\\\\')
+                                .filter { it.isLetterOrDigit() || it in " ._-()" }.trim()
+                            // Never let dot-path names escape the receive directory.
+                            val safeName = candidateName.takeUnless { it.isBlank() || it == "." || it == ".." }
+                                ?: "received_file"
                             val destination = withContext(Dispatchers.IO) {
                                 val directory = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: File(context.filesDir, "Downloads")
                                 directory.mkdirs()

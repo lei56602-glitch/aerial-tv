@@ -22,6 +22,8 @@ internal object LocalSendNative {
 
     external fun announceDiscovery(sessionId: String): String
 
+    external fun setAnswerAnnouncements(sessionId: String, enabled: Boolean): String
+
     external fun probeDevice(
         sessionId: String,
         host: String,

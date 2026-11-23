@@ -210,8 +210,25 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                             transferText = "正在接收：" + safeName
                             lastEvent = "保存位置：" + destination
                         }
+                        "fileUploadProgress" -> {
+                            val received = event.optLong("bytesReceived", -1L)
+                            if (received >= 0L) {
+                                transferText = "正在接收：$received 字节"
+                            }
+                        }
                         "fileUploadComplete" -> {
                             transferText = if (event.optBoolean("success")) "文件接收完成" else "文件接收失败：" + event.optString("error", "未知错误")
+                        }
+                        "prepareUploadAborted" -> {
+                            incomingRequest = null
+                            transferText = "发送方已取消文件请求"
+                        }
+                        "sessionEnd" -> {
+                            val reason = event.optString("reason")
+                            if (reason.isNotBlank()) transferText = "传输会话结束：$reason"
+                        }
+                        "cancelReceived" -> {
+                            transferText = "对方已取消传输"
                         }
                         "listenerFailed" -> status = "接收服务异常：" + event.optString("error")
                     }

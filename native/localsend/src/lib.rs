@@ -6,6 +6,9 @@ use localsend::http::server::{self, ServerConfigV2, TlsConfig};
 use localsend::http::server::common::save::FileUploadTarget;
 use localsend::http::server::v2::{PrepareUploadDecisionV2, ServerEventV2};
 use localsend::http::state::ClientInfo;
+use localsend::http::client::{LsHttpClient, LsHttpClientVersion};
+use localsend::http::dto::{PrepareUploadRequestDto, RegisterDto};
+use localsend::model::transfer::{FileContent, FileDto};
 use localsend::model::transfer::FileDto;
 use localsend::model::discovery::{DeviceType, ProtocolType, PROTOCOL_VERSION_V2};
 use localsend::multicast::{DEFAULT_MULTICAST_GROUP, DEFAULT_MULTICAST_GROUP_V6, DEFAULT_PORT};
@@ -17,6 +20,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
+use tokio_util::sync::CancellationToken;
 
 enum DiscoveryCommand {
     Announce,
@@ -41,6 +45,18 @@ struct HttpServerSession {
 }
 
 static HTTP_SERVERS: OnceLock<Mutex<HashMap<String, HttpServerSession>>> = OnceLock::new();
+
+struct OutgoingSession {
+    cancel: CancellationToken,
+    events: Arc<Mutex<VecDeque<Value>>>,
+    finished: Arc<AtomicBool>,
+}
+
+static OUTGOING_SESSIONS: OnceLock<Mutex<HashMap<String, OutgoingSession>>> = OnceLock::new();
+
+fn outgoing_sessions() -> &'static Mutex<HashMap<String, OutgoingSession>> {
+    OUTGOING_SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 fn http_servers() -> &'static Mutex<HashMap<String, HttpServerSession>> {
     HTTP_SERVERS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -689,4 +705,229 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_stopHttpSer
         })
     };
     return_json(&mut env, json!({"stopping": stopped.unwrap_or(false)}))
+}
+
+
+/// Starts an outgoing LocalSend v2.2 transfer from an Android file descriptor.
+/// The descriptor is consumed by LocalSend's native streaming implementation.
+#[no_mangle]
+pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_startSendFile(
+    mut env: JNIEnv,
+    _class: JClass,
+    alias: JString,
+    certificate: JString,
+    private_key: JString,
+    local_fingerprint: JString,
+    peer_host: JString,
+    peer_port: jint,
+    peer_fingerprint: JString,
+    local_port: jint,
+    file_descriptor: jint,
+    file_name: JString,
+    file_size: jlong,
+    file_type: JString,
+) -> jstring {
+    let values = (|| -> Result<(String, String, String, String, String, String, String), String> {
+        Ok((
+            java_string(&mut env, alias)?,
+            java_string(&mut env, certificate)?,
+            java_string(&mut env, private_key)?,
+            java_string(&mut env, local_fingerprint)?,
+            java_string(&mut env, peer_host)?,
+            java_string(&mut env, peer_fingerprint)?,
+            java_string(&mut env, file_name)?,
+        ))
+    })();
+    let (alias, certificate, private_key, local_fingerprint, peer_host, peer_fingerprint, file_name) = match values {
+        Ok(values) => values,
+        Err(error) => return return_json(&mut env, json!({"error": error})),
+    };
+    let file_type = match java_string(&mut env, file_type) {
+        Ok(value) => value,
+        Err(error) => return return_json(&mut env, json!({"error": error})),
+    };
+    if !(1..=65535).contains(&peer_port) || !(1..=65535).contains(&local_port) {
+        return return_json(&mut env, json!({"error": "Peer and local ports must be between 1 and 65535"}));
+    }
+    if file_descriptor < 0 || file_size < 0 || file_name.trim().is_empty() {
+        return return_json(&mut env, json!({"error": "Invalid file descriptor, size, or name"}));
+    }
+
+    let id = format!("send-{}", NEXT_SESSION.fetch_add(1, Ordering::Relaxed));
+    let file_id = format!("file-{}", NEXT_SESSION.fetch_add(1, Ordering::Relaxed));
+    let cancel = CancellationToken::new();
+    let events = Arc::new(Mutex::new(VecDeque::new()));
+    let finished = Arc::new(AtomicBool::new(false));
+    outgoing_sessions().lock().unwrap().insert(
+        id.clone(),
+        OutgoingSession {
+            cancel: cancel.clone(),
+            events: events.clone(),
+            finished: finished.clone(),
+        },
+    );
+
+    let spawn = std::thread::Builder::new()
+        .name("aerial-localsend-send".to_string())
+        .spawn(move || {
+            let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    events.lock().unwrap().push_back(json!({
+                        "type": "sendComplete", "success": false, "error": error.to_string()
+                    }));
+                    finished.store(true, Ordering::Release);
+                    return;
+                }
+            };
+
+            runtime.block_on(async move {
+                let protocol = ProtocolType::Https;
+                let result: Result<(), String> = async {
+                    let client = LsHttpClient::new(
+                        &private_key,
+                        &certificate,
+                        LsHttpClientVersion::V2,
+                        Some(peer_fingerprint.clone()),
+                        None,
+                    ).map_err(|error| error.to_string())?;
+
+                    let info = RegisterDto {
+                        alias,
+                        version: PROTOCOL_VERSION_V2.to_string(),
+                        device_model: Some("Android TV".to_string()),
+                        device_type: Some(DeviceType::Desktop),
+                        token: local_fingerprint,
+                        port: local_port as u16,
+                        protocol,
+                        has_web_interface: false,
+                    };
+
+                    let registered = client.register(protocol, &peer_host, peer_port as u16, info.clone())
+                        .await.map_err(|error| error.to_string())?;
+                    let public_key = registered.public_key;
+                    let metadata = FileDto {
+                        id: file_id.clone(),
+                        file_name: file_name.clone(),
+                        size: file_size as u64,
+                        file_type,
+                        sha256: None,
+                        preview: None,
+                        metadata: None,
+                    };
+                    let payload = PrepareUploadRequestDto {
+                        info,
+                        files: HashMap::from([(file_id.clone(), metadata)]),
+                    };
+                    let prepared = client.prepare_upload(
+                        protocol,
+                        &peer_host,
+                        peer_port as u16,
+                        public_key.clone(),
+                        payload,
+                        None,
+                        cancel.clone(),
+                    ).await.map_err(|error| error.to_string())?;
+                    let response = prepared.response.ok_or_else(|| "Receiver returned no upload session".to_string())?;
+                    let transfer_session = response.session_id;
+                    let token = response.files.get(&file_id)
+                        .cloned()
+                        .ok_or_else(|| "Receiver did not accept the selected file".to_string())?;
+
+                    events.lock().unwrap().push_back(json!({
+                        "type": "sendStarted", "sessionId": transfer_session,
+                        "fileId": file_id, "fileName": file_name, "fileSize": file_size
+                    }));
+
+                    #[cfg(target_os = "android")]
+                    let content = FileContent::Fd(file_descriptor);
+                    #[cfg(not(target_os = "android"))]
+                    let content = {
+                        let _ = file_descriptor;
+                        return Err("File-descriptor transfer is supported only on Android".to_string());
+                    };
+
+                    client.upload(
+                        protocol,
+                        &peer_host,
+                        peer_port as u16,
+                        public_key,
+                        &transfer_session,
+                        &file_id,
+                        &token,
+                        content,
+                        {
+                            let events = events.clone();
+                            move |bytes| {
+                                events.lock().unwrap().push_back(json!({
+                                    "type": "sendProgress", "sessionId": transfer_session,
+                                    "fileId": file_id, "bytesSent": bytes
+                                }));
+                            }
+                        },
+                        cancel.clone(),
+                    ).await.map_err(|error| error.to_string())?;
+                    Ok(())
+                }.await;
+
+                match result {
+                    Ok(()) => events.lock().unwrap().push_back(json!({"type": "sendComplete", "success": true})),
+                    Err(error) => events.lock().unwrap().push_back(json!({"type": "sendComplete", "success": false, "error": error})),
+                }
+                finished.store(true, Ordering::Release);
+            });
+        });
+
+    if let Err(error) = spawn {
+        outgoing_sessions().lock().unwrap().remove(&id);
+        return return_json(&mut env, json!({"error": error.to_string()}));
+    }
+    return_json(&mut env, json!({"sessionId": id}))
+}
+
+/// Drains outgoing transfer events.
+#[no_mangle]
+pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_pollSendEvents(
+    mut env: JNIEnv, _class: JClass, session: JString
+) -> jstring {
+    let id = match java_string(&mut env, session) {
+        Ok(value) => value,
+        Err(error) => return return_json(&mut env, json!({"error": error})),
+    };
+    let events = outgoing_sessions().lock().unwrap().get(&id).map(|session| {
+        session.events.lock().unwrap().drain(..).collect::<Vec<_>>()
+    });
+    match events {
+        Some(events) => return_json(&mut env, json!({"events": events})),
+        None => return_json(&mut env, json!({"error": "Unknown outgoing session"})),
+    }
+}
+
+/// Cancels an outgoing transfer.
+#[no_mangle]
+pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_cancelSend(
+    mut env: JNIEnv, _class: JClass, session: JString
+) -> jstring {
+    let id = match java_string(&mut env, session) {
+        Ok(value) => value,
+        Err(error) => return return_json(&mut env, json!({"error": error})),
+    };
+    let cancelled = outgoing_sessions().lock().unwrap().get(&id).map(|session| {
+        session.cancel.cancel();
+        true
+    }).unwrap_or(false);
+    return_json(&mut env, json!({"cancelled": cancelled}))
+}
+
+/// Releases the outgoing transfer event queue after the UI has consumed it.
+#[no_mangle]
+pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_releaseSend(
+    mut env: JNIEnv, _class: JClass, session: JString
+) -> jstring {
+    let id = match java_string(&mut env, session) {
+        Ok(value) => value,
+        Err(error) => return return_json(&mut env, json!({"error": error})),
+    };
+    let removed = outgoing_sessions().lock().unwrap().remove(&id).is_some();
+    return_json(&mut env, json!({"released": removed}))
 }

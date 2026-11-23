@@ -103,6 +103,14 @@ internal class LocalSendRuntime(context: Context) {
     }
 
     @Synchronized
+    fun setReceiveServerReady(ready: Boolean): Boolean {
+        val session = discoverySessionId ?: return false
+        return JSONObject(
+            LocalSendNative.setAnswerAnnouncements(session, ready)
+        ).optBoolean("queued")
+    }
+
+    @Synchronized
     fun probePeer(host: String, port: Int = 53317, https: Boolean = true): Boolean {
         require(host.isNotBlank()) { "Peer host cannot be empty" }
         require(port in 1..65535) { "Peer port must be between 1 and 65535" }

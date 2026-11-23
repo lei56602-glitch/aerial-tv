@@ -10,7 +10,7 @@ The integration must preserve Aerial's existing HOME behavior, settings, user da
 
 - Host app: `lei56602-glitch/aerial-tv`, default branch `main`.
 - Feature branch: `feature/localsend-integration`.
-- Embedded feature source: `lei56602-glitch/localsend`, default branch `main`.
+- Embedded feature source: `lei56602-glitch/localsend`, integration branch `integration/aerial-flutter-module` (current integration commit `651160962f081e56e81a3c1df7ab57feecd1eae7`; based on LocalSend `main` commit `281b491e9c0d0e692fc7ff1caaea28c897a64fd0`).
 - Aerial is native Kotlin + Jetpack Compose, minSdk 21, compileSdk 36, targetSdk 34, and has standard/guard flavors.
 - LocalSend's Android application is Flutter. Its app package is `org.localsend.localsend_app`; the app uses Dart packages and Flutter plugins. The Rust `packages/core` crate is not declared as a dependency by `app/pubspec.yaml`, so it is not the app's current transfer implementation.
 - LocalSend's current compatibility statement says Android 7.0 minimum; its Android manifest already declares Leanback and no-touchscreen support, but that does not establish complete D-pad usability. Aerial currently supports Android 5.0. Compatibility must be resolved explicitly rather than silently raising Aerial's minimum SDK.
@@ -19,9 +19,9 @@ The integration must preserve Aerial's existing HOME behavior, settings, user da
 
 ## Integration direction
 
-The first implementation candidate is Flutter add-to-app: embed LocalSend's existing Flutter application experience and business logic inside the Aerial APK, then expose it through a native Aerial entry under Personalization. This is the strongest route to preserving the full upstream feature set (discovery, send/receive, QR/link workflows, transfer queue/progress, settings, history, translations, protocol/security behavior) without reimplementing the protocol in Kotlin.
+The first implementation candidate is Flutter add-to-app: embed LocalSend's existing Flutter application experience and business logic inside the Aerial APK, then expose it through a native Aerial entry under Personalization. A dedicated `aerial_module/` workspace member has now been added on the LocalSend integration branch. Its Dart entry point delegates to the original `localsend_app.main`, retaining LocalSend's original bootstrap and transfer implementation. A GitHub Actions workflow (`.github/workflows/aerial-module.yml`) was added to resolve the workspace and build the Android AAR repository. This is the strongest route to preserving the full upstream feature set (discovery, send/receive, QR/link workflows, transfer queue/progress, settings, history, translations, protocol/security behavior) without reimplementing the protocol in Kotlin.
 
-Before wiring it into the host build, prove a minimal add-to-app build against the exact LocalSend fork and Aerial toolchains. The existing LocalSend Android application module cannot simply be copied into Aerial: it is a separate Flutter application, with its own applicationId, target SDK, Flutter Gradle plugin, manifest, and plugin registrations.
+Before wiring it into the host build, prove the new module actually resolves and builds with Flutter 3.41.0, including the Rust FFI plugin, Android native plugins, and ABI outputs. The workflow has been committed but its successful execution/artifact has not yet been verified. Then prove a minimal add-to-app host build against the exact LocalSend fork and Aerial toolchains. The existing LocalSend Android application module cannot simply be copied into Aerial: it is a separate Flutter application, with its own applicationId, target SDK, Flutter Gradle plugin, manifest, and plugin registrations.
 
 If Flutter add-to-app cannot meet Aerial's Android 5.0 support or APK/runtime constraints, evaluate a pinned older compatible LocalSend release or a carefully scoped protocol/core port. Do not claim full feature parity for a partial Kotlin rewrite. Do not use the Rust crate as a shortcut unless an Android FFI layer and feature parity are actually demonstrated.
 

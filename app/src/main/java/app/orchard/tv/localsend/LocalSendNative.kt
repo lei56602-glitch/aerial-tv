@@ -57,4 +57,25 @@ internal object LocalSendNative {
     ): String
 
     external fun stopHttpServer(sessionId: String): String
+
+    external fun startSendFile(
+        alias: String,
+        certificate: String,
+        privateKey: String,
+        localFingerprint: String,
+        peerHost: String,
+        peerPort: Int,
+        peerFingerprint: String,
+        localPort: Int,
+        fileDescriptor: Int,
+        fileName: String,
+        fileSize: Long,
+        fileType: String
+    ): String
+
+    external fun pollSendEvents(sessionId: String): String
+
+    external fun cancelSend(sessionId: String): String
+
+    external fun releaseSend(sessionId: String): String
 }

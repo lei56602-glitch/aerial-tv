@@ -24,6 +24,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,6 +58,7 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
     var transferSession by remember { mutableStateOf<String?>(null) }
     var transferText by remember { mutableStateOf("尚未发送文件") }
     var lastEvent by remember { mutableStateOf("") }
+    val activeTransferSession by rememberUpdatedState(transferSession)
 
     BackHandler(onBack = onDismiss)
 
@@ -106,7 +108,7 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
             status = "正在搜索同一局域网内的 LocalSend 设备"
             while (true) {
                 val snapshot = withContext(Dispatchers.IO) {
-                    runtime.getDiscoveredDevices() to (transferSession?.let(runtime::pollSendEvents) ?: JSONArray())
+                    runtime.getDiscoveredDevices() to (activeTransferSession?.let(runtime::pollSendEvents) ?: JSONArray())
                 }
                 peers = snapshot.first
                 if (snapshot.second.length() > 0) {
@@ -115,9 +117,20 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                         lastEvent = event.toString()
                         val kind = event.optString("type", event.optString("event"))
                         val progress = event.opt("progress")
-                        if (progress is Number) transferText = "传输进度：${(progress.toDouble() * 100).toInt().coerceIn(0, 100)}%"
-                        if (kind.contains("complete", true) || kind.contains("finish", true)) transferText = "文件发送完成"
-                        if (kind.contains("error", true)) transferText = "发送失败：${event.optString("message", event.optString("error"))}"
+                        if (progress is Number) {
+                            val value = progress.toDouble()
+                            transferText = "传输进度：${(if (value <= 1.0) value * 100 else value).toInt().coerceIn(0, 100)}%"
+                        }
+                        if (kind.contains("complete", true) || kind.contains("finish", true)) {
+                            transferText = "文件发送完成"
+                            activeTransferSession?.let { id -> withContext(Dispatchers.IO) { runtime.releaseSend(id) } }
+                            transferSession = null
+                        }
+                        if (kind.contains("error", true)) {
+                            transferText = "发送失败：${event.optString("message", event.optString("error"))}"
+                            activeTransferSession?.let { id -> withContext(Dispatchers.IO) { runtime.releaseSend(id) } }
+                            transferSession = null
+                        }
                     }
                 }
                 delay(900)
@@ -126,7 +139,7 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
             status = "LocalSend 启动失败：${error.message ?: "请检查网络"}"
         } finally {
             withContext(Dispatchers.IO) {
-                transferSession?.let { runCatching { runtime.cancelSend(it); runtime.releaseSend(it) } }
+                activeTransferSession?.let { runCatching { runtime.cancelSend(it); runtime.releaseSend(it) } }
                 runCatching { runtime.stopDiscovery() }
                 runCatching { runtime.stopHttpServer() }
             }
@@ -147,7 +160,7 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                     Spacer(Modifier.height(5.dp))
                     BasicText(status, style = Type.Caption.copy(color = Color(0xFFB7C8DA)), maxLines = 2)
                 }
-                LocalSendAction("关闭", onDismiss)
+                LocalSendAction("关闭", onClick = onDismiss)
             }
             BasicText("附近设备（${peers.size}）", style = Type.Headline.copy(color = Color.White))
             if (peers.isEmpty()) {
@@ -155,7 +168,7 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
             } else {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     peers.forEach { peer ->
-                        val channel = peer.channels.firstOrNull()
+                        val channel = peer.channels.firstOrNull { it.protocol.equals("https", ignoreCase = true) }
                         Row(
                             Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
                                 .background(if (selected?.first?.fingerprint == peer.fingerprint) Color(0xFF285C86) else Color(0xFF20344B))

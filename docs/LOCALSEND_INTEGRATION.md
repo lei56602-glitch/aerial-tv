@@ -2,52 +2,63 @@
 
 ## Product decision
 
-Integrate the complete LocalSend experience into Aerial TV as an in-process feature reachable from **Settings → Personalization → LocalSend**. It must not launch or require a separately installed LocalSend APK. The deliverable is one installable Aerial APK.
+Integrate the complete LocalSend transfer experience into Aerial TV as an in-process feature reachable from **Settings → Personalization → LocalSend**. It must not launch or require a separately installed LocalSend APK. The deliverable is one installable Aerial APK.
 
-The integration must preserve Aerial's existing HOME behavior, settings, user data, package ID (`app.orchard.tv`), standard/guard flavors, and no-ad policy. Do not change unrelated wallpaper, screensaver, launcher, phone setup, or guard behavior.
+Preserve Aerial's HOME behavior, settings, user data, package ID (`app.orchard.tv`), standard/guard flavors, Android 5.0 minimum SDK, and no-ad policy. Do not change unrelated wallpaper, screensaver, launcher, phone setup, or guard behavior.
 
 ## Repository baseline
 
-- Host app: `lei56602-glitch/aerial-tv`, default branch `main`.
-- Feature branch: `feature/localsend-integration`.
-- Embedded feature source: `lei56602-glitch/localsend`, integration branch `integration/aerial-flutter-module` (current integration commit `651160962f081e56e81a3c1df7ab57feecd1eae7`; based on LocalSend `main` commit `281b491e9c0d0e692fc7ff1caaea28c897a64fd0`).
-- Aerial is native Kotlin + Jetpack Compose, minSdk 21, compileSdk 36, targetSdk 34, and has standard/guard flavors.
-- LocalSend's Android application is Flutter. Its app package is `org.localsend.localsend_app`; the app uses Dart packages and Flutter plugins. The Rust `packages/core` crate is not declared as a dependency by `app/pubspec.yaml`, so it is not the app's current transfer implementation.
-- LocalSend's current compatibility statement says Android 7.0 minimum; its Android manifest already declares Leanback and no-touchscreen support, but that does not establish complete D-pad usability. Aerial currently supports Android 5.0. Compatibility must be resolved explicitly rather than silently raising Aerial's minimum SDK.
-- Build-tool baselines differ: Aerial uses Gradle 8.14.3 / AGP 8.12.0 / Kotlin 2.2.10; LocalSend's standalone Android app uses Gradle 8.13 / AGP 8.12.1 / Kotlin 2.2.0. A host integration must use one compatible toolchain, not import the standalone app's Gradle project wholesale.
-- LocalSend's existing Flutter entry point initializes Refena, localization, settings, and the home page; its home tabs include Receive, Send, and Settings. The Android manifest also declares storage/media, foreground data-sync, local-network, and other app-level permissions/services. These need a deliberate merge/registration review; copying the whole manifest would introduce unrelated app identity and launcher configuration.
+- Host app: `lei56602-glitch/aerial-tv`.
+- Working branch: `feature/localsend-integration`.
+- LocalSend source is pinned as a Git submodule at `third_party/localsend`, URL `https://github.com/lei56602-glitch/localsend.git`, commit `281b491e9c0d0e692fc7ff1caaea28c897a64fd0` (LocalSend main as inspected on 2026-11-23). Clone with `git submodule update --init --recursive`.
+- Aerial is native Kotlin + Jetpack Compose, minSdk 21 (Android 5.0), compileSdk 36, targetSdk 34, with standard/guard flavors.
+- LocalSend's standalone Android app is Flutter. Its app package is `org.localsend.localsend_app`; it uses Dart packages and Flutter plugins. The Rust core is in `third_party/localsend/packages/core`, and the existing Flutter-to-Rust bridge is in `third_party/localsend/packages/localsend_isolates`.
+- The existing Rust bridge crate already enables the LocalSend core's `full` feature set and contains working wrappers for identity/crypto, discovery, HTTP client operations, upload progress, cancellation, and Android file descriptors.
+- LocalSend's current Flutter generation cannot be embedded directly without breaking Aerial's compatibility promise: Flutter 3.35+ raised its Android minimum to API 24 (Android 7.0), while Aerial must remain installable on API 21 (Android 5.0). Do not use `tools:overrideLibrary` to conceal this runtime incompatibility, and do not raise Aerial's minSdk.
+- The Flutter module experiment is therefore not the production integration route. A draft experiment exists separately in LocalSend PR #1; it is not merged and must not be treated as the Aerial implementation.
 
-## Integration direction
+## Integration architecture
 
-The first implementation candidate is Flutter add-to-app: embed LocalSend's existing Flutter application experience and business logic inside the Aerial APK, then expose it through a native Aerial entry under Personalization. A dedicated `aerial_module/` workspace member has now been added on the LocalSend integration branch. Its Dart entry point delegates to the original `localsend_app.main`, retaining LocalSend's original bootstrap and transfer implementation. A GitHub Actions workflow (`.github/workflows/aerial-module.yml`) was added to resolve the workspace and build the Android AAR repository. This is the strongest route to preserving the full upstream feature set (discovery, send/receive, QR/link workflows, transfer queue/progress, settings, history, translations, protocol/security behavior) without reimplementing the protocol in Kotlin.
+Use **Aerial-native Kotlin/Compose UI + LocalSend Rust protocol core through JNI/UniFFI**.
 
-Before wiring it into the host build, prove the new module actually resolves and builds with Flutter 3.41.0, including the Rust FFI plugin, Android native plugins, and ABI outputs. The workflow has been committed but its successful execution/artifact has not yet been verified. Then prove a minimal add-to-app host build against the exact LocalSend fork and Aerial toolchains. The existing LocalSend Android application module cannot simply be copied into Aerial: it is a separate Flutter application, with its own applicationId, target SDK, Flutter Gradle plugin, manifest, and plugin registrations.
+1. Build the pinned Rust LocalSend core for Android ABIs with Android NDK and an API-21-compatible target. The existing `rust_builder/android/build.gradle` declares minSdk 19, which is useful evidence for the current Rust bridge packaging, but the new host bridge still needs an actual API-21 build and device test.
+2. Add a small Android FFI crate/bridge around `third_party/localsend/packages/core`. Reuse LocalSend's Rust implementation for discovery, multicast, HTTP/HTTPS, TLS identity and certificate pinning, file upload/download, checksums, and cancellation. Do not reimplement cryptography or protocol wire formats in Kotlin.
+3. Port the app-level orchestration currently in LocalSend's Dart code to Kotlin: device list/state, transfer queues, accept/reject, progress, history, persisted settings, receive server lifecycle, QR/manual connection flows, and error recovery. Preserve the behavior and protocol compatibility of the pinned LocalSend source.
+4. Build the complete TV interface in Aerial's Compose design system and expose it under Personalization. Adapt all operations for D-pad/OK/Back, 16:9 landscape, visible focus, and Android TV document/file pickers.
+5. Keep all required receive-server/background behavior within the Aerial process and Android lifecycle. Merge only necessary permissions/services; do not copy LocalSend's standalone application ID, launcher activity, icon, quick-settings tile, or Flutter app shell.
 
-If Flutter add-to-app cannot meet Aerial's Android 5.0 support or APK/runtime constraints, evaluate a pinned older compatible LocalSend release or a carefully scoped protocol/core port. Do not claim full feature parity for a partial Kotlin rewrite. Do not use the Rust crate as a shortcut unless an Android FFI layer and feature parity are actually demonstrated.
+The Rust core is a protocol engine, not the whole LocalSend product. A JNI wrapper alone is not full integration: Kotlin must also implement the app-level orchestration and all user-facing workflows. Do not mark a feature complete merely because the native library builds.
 
-## UI and TV requirements
+## Required feature parity
 
-- Aerial owns the entry point and navigation; LocalSend must appear under Personalization.
-- Keep the LocalSend workflows intact, but adapt all reachable controls for a TV remote: D-pad focus, OK, Back, focus visibility, overscan-safe layout, and 16:9 landscape.
-- No touch-only dead ends. File/folder selection must use Android TV-compatible document provider flows or a TV-friendly picker.
-- Keep discovery and transfer services alive only for the required lifecycle; handle activity pause/resume, process recreation, and network changes.
-- Preserve LocalSend protocol compatibility with existing LocalSend clients. Do not introduce a relay server or cloud dependency.
+- LAN discovery, multicast announcements, subnet scanning, device deduplication and multiple network interfaces.
+- Device identity, certificates, fingerprints, encryption, PIN/security settings and peer verification.
+- Send and receive files, multiple files, large files, file metadata, checksums and previews where supported.
+- Prepare/accept/reject flows, upload/download, progress, cancellation, failures and retry handling.
+- QR/link sharing and manual peer connection where supported by the protocol.
+- Transfer history and management.
+- Device name, network interface filters, receive location, protocol/security preferences and all relevant LocalSend settings.
+- LocalSend interoperability with existing Android, iOS, Windows, macOS and Linux clients; no cloud relay or third-party server.
+
+Any feature that depends on a platform-specific capability unavailable on Android TV must be explicitly identified and replaced with a TV-appropriate equivalent, not silently dropped.
 
 ## Implementation phases
 
-1. **Compatibility spike**: pin both repository revisions; determine Flutter/Dart/Gradle/AGP/JDK/NDK requirements; test a Flutter add-to-app host activity and plugin registration; verify minSdk and ABI behavior. No changes to Aerial's production build until this succeeds.
-2. **Embedded runtime**: package the complete LocalSend Flutter feature into the Aerial APK, preserve its Dart services, assets, localization, permissions, and native plugin registrations. Keep the LocalSend applicationId out of the host manifest.
-3. **Aerial entry and TV adaptation**: add the Personalization row and embedded route; adapt focus/back/file selection and landscape layouts without removing LocalSend workflows.
-4. **Regression and protocol tests**: build standard and guard release variants; test LocalSend-to-Aerial and Aerial-to-LocalSend discovery, QR/manual peer connection, encrypted transfer, multiple files, large files, accept/reject, failures, history, and settings. Test on Android TV hardware and supported Android API levels.
-5. **Release**: update versionCode according to Aerial's handoff rules, build signed release APKs using the owner's existing signing setup, and publish only after real-device verification.
+1. **Source and ABI baseline**: verify the submodule commit, inspect all Rust core APIs and existing Flutter bridge wrappers, establish NDK/Cargo toolchain, and compile the Rust core for each Aerial ABI with API 21. Do not alter Aerial's minSdk.
+2. **Native bridge**: add the JNI/UniFFI wrapper with structured DTOs and event streams for discovery, transfer progress, cancellation, and errors. Add Rust unit/integration tests and JNI smoke tests.
+3. **Kotlin service layer**: port LocalSend's Dart orchestration and persistence to Kotlin without changing the LocalSend protocol. Implement receive server lifecycle, transfer queue, device store, history, security settings, and storage access.
+4. **Personalization UI**: add the LocalSend entry in Aerial's `WallpaperSheet.kt` (the Personalization panel) and launch the native transfer center. Preserve Aerial's existing visual system and remote-control focus behavior.
+5. **Regression and protocol tests**: build standard and guard release variants; test discovery and bidirectional transfer against real LocalSend clients, encrypted sessions, multiple/large files, accept/reject, cancellations, failures, history, QR/manual connection, network changes, sleep/resume, and Android API 21/24/29/34+.
+6. **Release**: follow `docs/HANDOFF.md` versionCode and signing rules, build signed APKs using the owner's existing signing setup, and publish only after real-device TV verification.
 
 ## Non-negotiable acceptance criteria
 
 - One Aerial APK; no separate LocalSend installation.
 - Entry is under Personalization.
 - Existing LocalSend clients can discover and exchange files with Aerial.
-- Full LocalSend workflows are retained or any unsupported TV-only workflow is explicitly documented; no silent feature deletion.
+- Full user-facing workflows and protocol behavior are retained; no silent feature deletion.
 - D-pad/Back operation works throughout.
-- Existing Aerial launcher, phone setup, screensaver, guard, and user data regressions are absent.
-- No ads, ad SDKs, or third-party relay service.
+- Aerial remains minSdk 21; no Flutter engine/API-24 dependency in the base app.
+- Existing launcher, phone setup, screensaver, guard, and user data regressions are absent.
+- No ads, ad SDKs, cloud relay, or third-party service.
 - Never report a feature as complete without a successful build and real-device verification.

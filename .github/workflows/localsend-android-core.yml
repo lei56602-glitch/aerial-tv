@@ -2,6 +2,16 @@ name: LocalSend Android core
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - "feature/localsend-integration"
+    paths:
+      - ".gitmodules"
+      - "docs/LOCALSEND_INTEGRATION.md"
+      - "native/localsend/**"
+      - "app/src/main/java/app/orchard/tv/localsend/**"
+      - "app/src/main/AndroidManifest.xml"
+      - ".github/workflows/localsend-android-core.yml"
   pull_request:
     paths:
       - ".gitmodules"

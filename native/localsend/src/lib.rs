@@ -1,5 +1,5 @@
 use jni::objects::{JClass, JString};
-use jni::sys::jstring;
+use jni::sys::{jint, jboolean, jstring};
 use jni::JNIEnv;
 use localsend::discovery::{self, ChannelStatus, DeviceChannel, DeviceIdentity, DiscoveryConfig, DiscoveryEvent};
 use localsend::model::discovery::{DeviceType, ProtocolType, PROTOCOL_VERSION_V2};
@@ -13,10 +13,16 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
+enum DiscoveryCommand {
+    Announce,
+    Probe { host: String, port: u16, https: bool },
+}
+
 struct DiscoverySession {
     stop: oneshot::Sender<()>,
     stopped: Arc<AtomicBool>,
     snapshot: Arc<Mutex<String>>,
+    commands: mpsc::UnboundedSender<DiscoveryCommand>,
 }
 
 static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
@@ -137,6 +143,7 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_startDiscov
     let (stop_tx, stop_rx) = oneshot::channel::<()>();
     let stopped = Arc::new(AtomicBool::new(false));
     let snapshot = Arc::new(Mutex::new(json!({ "devices": [] }).to_string()));
+    let (command_tx, mut command_rx) = mpsc::unbounded_channel::<DiscoveryCommand>();
 
     {
         let mut all = sessions().lock().unwrap();
@@ -146,6 +153,7 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_startDiscov
                 stop: stop_tx,
                 stopped: stopped.clone(),
                 snapshot: snapshot.clone(),
+                commands: command_tx,
             },
         );
     }
@@ -207,6 +215,17 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_startDiscov
                             }
                             *snapshot.lock().unwrap() = device_snapshot(handle.devices());
                         }
+                        command = command_rx.recv() => {
+                            match command {
+                                Some(DiscoveryCommand::Announce) => handle.announce().await,
+                                Some(DiscoveryCommand::Probe { host, port, https }) => {
+                                    let protocol = if https { ProtocolType::Https } else { ProtocolType::Http };
+                                    let _ = handle.discover(&host, port, protocol).await;
+                                }
+                                None => break,
+                            }
+                            *snapshot.lock().unwrap() = device_snapshot(handle.devices());
+                        }
                     }
                 }
 
@@ -265,4 +284,20 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_stopDiscove
         }
         None => return_json(&mut env, json!({ "stopping": false, "error": "Unknown discovery session" })),
     }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_announceDiscovery(mut env: JNIEnv, _class: JClass, session: JString) -> jstring {
+    let session_id = match java_string(&mut env, session) { Ok(v) => v, Err(e) => return_json(&mut env, json!({"error": e})) };
+    let queued = sessions().lock().unwrap().get(&session_id).map(|s| s.commands.send(DiscoveryCommand::Announce).is_ok()).unwrap_or(false);
+    return_json(&mut env, json!({"queued": queued}))
+}
+
+#[no_mangle]
+pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_probeDevice(mut env: JNIEnv, _class: JClass, session: JString, host: JString, port: jint, https: jboolean) -> jstring {
+    let session_id = match java_string(&mut env, session) { Ok(v) => v, Err(e) => return_json(&mut env, json!({"error": e})) };
+    let host = match java_string(&mut env, host) { Ok(v) => v, Err(e) => return_json(&mut env, json!({"error": e})) };
+    if !(1..=65535).contains(&port) { return return_json(&mut env, json!({"error": "Port must be between 1 and 65535"})); }
+    let queued = sessions().lock().unwrap().get(&session_id).map(|s| s.commands.send(DiscoveryCommand::Probe { host, port: port as u16, https: https != 0 }).is_ok()).unwrap_or(false);
+    return_json(&mut env, json!({"queued": queued}))
 }

@@ -16,6 +16,8 @@ use localsend::util::interface::InterfaceFilter;
 use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
+#[cfg(target_os = "android")]
+use std::os::fd::{FromRawFd, IntoRawFd, OwnedFd};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -401,6 +403,8 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_startHttpSe
     let spawn_result = std::thread::Builder::new()
         .name("aerial-localsend-http".to_string())
         .spawn(move || {
+            #[cfg(target_os = "android")]
+            let owned_file_descriptor = owned_file_descriptor;
             let runtime = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
                 Ok(runtime) => runtime,
                 Err(error) => {
@@ -753,6 +757,9 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_startSendFi
         return return_json(&mut env, json!({"error": "Invalid file descriptor, size, or name"}));
     }
 
+    #[cfg(target_os = "android")]
+    let owned_file_descriptor = unsafe { OwnedFd::from_raw_fd(file_descriptor) };
+
     let id = format!("send-{}", NEXT_SESSION.fetch_add(1, Ordering::Relaxed));
     let file_id = format!("file-{}", NEXT_SESSION.fetch_add(1, Ordering::Relaxed));
     let cancel = CancellationToken::new();
@@ -840,7 +847,7 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_startSendFi
                     }));
 
                     #[cfg(target_os = "android")]
-                    let content = FileContent::Fd(file_descriptor);
+                    let content = FileContent::Fd(owned_file_descriptor.into_raw_fd());
                     #[cfg(not(target_os = "android"))]
                     let content = {
                         let _ = file_descriptor;

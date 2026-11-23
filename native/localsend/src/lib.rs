@@ -623,14 +623,57 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_acceptFileU
         .and_then(|server| server.pending_uploads.lock().unwrap().remove(&(transfer_session_id, file_id.clone())));
     match pending {
         Some(target_tx) => {
-            let (result_tx, _result_rx) = oneshot::channel::<Result<(), String>>();
+            let (result_tx, result_rx) = oneshot::channel::<Result<(), String>>();
+            let (progress_tx, mut progress_rx) = mpsc::channel::<u64>(16);
             let target = FileUploadTarget::Path {
                 path,
                 result_tx,
-                progress_tx: None,
+                progress_tx: Some(progress_tx),
             };
             match target_tx.send(target) {
-                Ok(()) => return_json(&mut env, json!({"ok": true})),
+                Ok(()) => {
+                    let events = http_servers().lock().unwrap().get(&session_id)
+                        .map(|server| server.events.clone());
+                    if let Some(events) = events {
+                        let event_session = transfer_session_id.clone();
+                        let event_file = file_id.clone();
+                        tokio::spawn(async move {
+                            let mut last_bytes = 0u64;
+                            loop {
+                                tokio::select! {
+                                    progress = progress_rx.recv() => {
+                                        match progress {
+                                            Some(bytes) => {
+                                                last_bytes = bytes;
+                                                events.lock().unwrap().push_back(json!({
+                                                    "type": "fileUploadProgress",
+                                                    "sessionId": event_session,
+                                                    "fileId": event_file,
+                                                    "bytesReceived": bytes
+                                                }));
+                                            }
+                                            None => break,
+                                        }
+                                    }
+                                    result = result_rx => {
+                                        let value = match result {
+                                            Ok(Ok(())) => json!({"type": "fileUploadComplete", "success": true}),
+                                            Ok(Err(error)) => json!({"type": "fileUploadComplete", "success": false, "error": error}),
+                                            Err(_) => json!({"type": "fileUploadComplete", "success": false, "error": "Upload result channel closed"}),
+                                        };
+                                        let mut value = value;
+                                        value["sessionId"] = json!(event_session);
+                                        value["fileId"] = json!(event_file);
+                                        value["bytesReceived"] = json!(last_bytes);
+                                        events.lock().unwrap().push_back(value);
+                                        break;
+                                    }
+                                }
+                            }
+                        });
+                    }
+                    return_json(&mut env, json!({"ok": true}))
+                }
                 Err(_) => return_json(&mut env, json!({"error": "Upload request already ended"})),
             }
         }

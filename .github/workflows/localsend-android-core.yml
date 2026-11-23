@@ -41,8 +41,15 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
 
-      - name: Build LocalSend full protocol core for Android API 21
-        working-directory: third_party/localsend/packages/core
+      - name: Build LocalSend JNI bridge and full protocol core for Android API 21
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
-        run: cargo ndk -t arm64-v8a --platform 21 build --release --features full
+        run: cargo ndk -t arm64-v8a --platform 21 build --release --manifest-path native/localsend/Cargo.toml
+
+      - name: Upload native bridge smoke-test library
+        uses: actions/upload-artifact@v4
+        with:
+          name: aerial-localsend-arm64-api21
+          path: native/localsend/target/aarch64-linux-android/release/libaerial_localsend.so
+          if-no-files-found: error
+          retention-days: 14

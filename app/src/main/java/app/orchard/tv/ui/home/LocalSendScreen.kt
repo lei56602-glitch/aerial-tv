@@ -1,6 +1,8 @@
 package app.orchard.tv.ui.home
 
 import android.provider.OpenableColumns
+import android.os.Environment
+import java.io.File
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -46,6 +48,9 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
+private data class IncomingLocalFile(val id: String, val name: String, val size: Long)
+private data class IncomingLocalRequest(val sessionId: String, val sender: String, val files: List<IncomingLocalFile>)
+
 @Composable
 internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
     if (!visible) return
@@ -59,6 +64,7 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
     var transferText by remember { mutableStateOf("尚未发送文件") }
     var lastEvent by remember { mutableStateOf("") }
     var transferFileSize by remember { mutableStateOf(0L) }
+    var incomingRequest by remember { mutableStateOf<IncomingLocalRequest?>(null) }
     val activeTransferSession by rememberUpdatedState(transferSession)
 
     BackHandler(onBack = onDismiss)
@@ -144,6 +150,61 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
         }
     }
 
+    LaunchedEffect(runtime) {
+        while (true) {
+            try {
+                val events = withContext(Dispatchers.IO) { runtime.pollHttpServerEvents() }
+                for (index in 0 until events.length()) {
+                    val event = events.optJSONObject(index) ?: continue
+                    when (event.optString("type")) {
+                        "prepareUpload" -> {
+                            val filesObject = event.optJSONObject("files") ?: JSONObject()
+                            val files = buildList {
+                                val keys = filesObject.keys()
+                                while (keys.hasNext()) {
+                                    val id = keys.next()
+                                    val item = filesObject.optJSONObject(id) ?: continue
+                                    add(IncomingLocalFile(id, item.optString("fileName", item.optString("file_name", "未命名文件")), item.optLong("size")))
+                                }
+                            }
+                            val sender = event.optJSONObject("device")?.optString("alias")?.takeIf { it.isNotBlank() } ?: event.optString("ip")
+                            incomingRequest = IncomingLocalRequest(event.optString("sessionId"), sender, files)
+                        }
+                        "fileUpload" -> {
+                            val sessionId = event.optString("sessionId")
+                            val fileId = event.optString("fileId")
+                            val item = event.optJSONObject("file") ?: JSONObject()
+                            val rawName = item.optString("fileName", item.optString("file_name", "received_file"))
+                            val safeName = rawName.substringAfterLast('/').filter { it.isLetterOrDigit() || it in " ._-()" }.trim().ifBlank { "received_file" }
+                            val destination = withContext(Dispatchers.IO) {
+                                val directory = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: File(context.filesDir, "Downloads")
+                                directory.mkdirs()
+                                var output = File(directory, safeName)
+                                var suffix = 1
+                                while (output.exists()) {
+                                    val dot = safeName.lastIndexOf('.').takeIf { it > 0 } ?: safeName.length
+                                    output = File(directory, safeName.substring(0, dot) + " (" + suffix + ")" + safeName.substring(dot))
+                                    suffix++
+                                }
+                                runtime.acceptIncomingFile(sessionId, fileId, output.absolutePath)
+                                output.absolutePath
+                            }
+                            transferText = "正在接收：" + safeName
+                            lastEvent = "保存位置：" + destination
+                        }
+                        "fileUploadComplete" -> {
+                            transferText = if (event.optBoolean("success")) "文件接收完成" else "文件接收失败：" + event.optString("error", "未知错误")
+                        }
+                        "listenerFailed" -> status = "接收服务异常：" + event.optString("error")
+                    }
+                }
+            } catch (error: Throwable) {
+                status = "接收服务异常：" + (error.message ?: "未知错误")
+            }
+            delay(700)
+        }
+    }
+
     Box(
         Modifier.fillMaxSize().background(Color(0xE90B1424)).padding(horizontal = 54.dp, vertical = 34.dp),
         contentAlignment = Alignment.Center,
@@ -196,6 +257,38 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                     transferSession?.let { id ->
                         scope.launch(Dispatchers.IO) { runtime.cancelSend(id) }
                         transferText = "已请求取消传输"
+                    }
+                }
+            }
+            incomingRequest?.let { request ->
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color(0xFF5A3A26)).padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    BasicText("收到来自 " + request.sender + " 的文件请求", style = Type.Headline.copy(color = Color.White))
+                    request.files.forEach { file ->
+                        BasicText(file.name + " · " + file.size + " 字节", style = Type.Body.copy(color = Color.White))
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        LocalSendAction("接收文件", onClick = {
+                            val pending = incomingRequest ?: return@LocalSendAction
+                            scope.launch {
+                                runCatching {
+                                    withContext(Dispatchers.IO) {
+                                        runtime.respondToIncomingFiles(pending.sessionId, pending.files.map { it.id })
+                                    }
+                                }.onSuccess { transferText = "已同意接收，正在准备文件" }
+                                    .onFailure { transferText = "接收请求失败：" + it.message }
+                            }
+                            incomingRequest = null
+                        })
+                        LocalSendAction("拒绝", onClick = {
+                            val pending = incomingRequest ?: return@LocalSendAction
+                            scope.launch(Dispatchers.IO) {
+                                runCatching { runtime.respondToIncomingFiles(pending.sessionId, null) }
+                            }
+                            incomingRequest = null
+                        })
                     }
                 }
             }

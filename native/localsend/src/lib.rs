@@ -3,14 +3,13 @@ use jni::sys::{jint, jboolean, jlong, jstring};
 use jni::JNIEnv;
 use localsend::discovery::{self, ChannelStatus, DeviceChannel, DeviceIdentity, DiscoveryConfig, DiscoveryEvent};
 use localsend::http::server::{self, ServerConfigV2, TlsConfig};
-use localsend::http::server::web::{WebConfig, WebI18n, WebPages};
+use localsend::http::server::web::WebConfig;
 use localsend::http::server::common::save::FileUploadTarget;
 use localsend::http::server::v2::{PrepareUploadDecisionV2, ServerEventV2};
 use localsend::http::state::ClientInfo;
 use localsend::http::client::{LsHttpClient, LsHttpClientVersion};
 use localsend::http::dto::{PrepareUploadRequestDto, RegisterDto};
 use localsend::model::transfer::{FileContent, FileDto};
-use localsend::model::transfer::FileDto;
 use localsend::model::discovery::{DeviceType, ProtocolType, PROTOCOL_VERSION_V2};
 use localsend::multicast::{DEFAULT_MULTICAST_GROUP, DEFAULT_MULTICAST_GROUP_V6, DEFAULT_PORT};
 use localsend::util::interface::InterfaceFilter;
@@ -433,12 +432,7 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_startHttpSe
                         verify_checksums: true,
                         event_tx,
                     }),
-                    WebConfig {
-                        send: None,
-                        upload: false,
-                        i18n: WebI18n::default(),
-                        pages: WebPages::default(),
-                    },
+                    WebConfig::default(),
                     stop_rx,
                 ).await;
 

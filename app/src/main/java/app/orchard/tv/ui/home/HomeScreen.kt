@@ -81,6 +81,7 @@ import app.orchard.tv.apps.AppEntry
 import app.orchard.tv.ui.control.ControlCenter
 import app.orchard.tv.ui.wallpaper.SheetCovers
 import app.orchard.tv.ui.wallpaper.WallpaperSheet
+import app.orchard.tv.ui.home.LocalSendScreen
 import app.orchard.tv.wallpaper.AerialFormats
 import app.orchard.tv.wallpaper.ScreensaverMode
 import app.orchard.tv.wallpaper.Wallpapers
@@ -1123,6 +1124,7 @@ fun HomeScreen(
             onKids = vm::setUpKidsMode,
             homeStatus = vm.homeStatus,
             onUpdate = { vm.overlay = Overlay.ControlCenter(CcPage.Update) },
+            onLocalSend = { vm.overlay = Overlay.LocalSend },
             onStartScreensaver = {
                 vm.overlay = Overlay.None
                 onStartScreensaver()
@@ -1132,6 +1134,11 @@ fun HomeScreen(
                 // Kids mode cannot be left without a PIN: it goes with it.
                 else vm.whenUnlocked { AerialSettings.choosePin(null); Restricted.chooseEnabled(false); vm.overlay = Overlay.Wallpaper }
             },
+        )
+
+        LocalSendScreen(
+            visible = overlay is Overlay.LocalSend,
+            onDismiss = { vm.overlay = Overlay.Wallpaper },
         )
 
         val pin = overlay as? Overlay.Pin

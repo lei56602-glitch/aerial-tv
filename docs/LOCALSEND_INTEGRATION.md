@@ -13,7 +13,9 @@ The integration must preserve Aerial's existing HOME behavior, settings, user da
 - Embedded feature source: `lei56602-glitch/localsend`, default branch `main`.
 - Aerial is native Kotlin + Jetpack Compose, minSdk 21, compileSdk 36, targetSdk 34, and has standard/guard flavors.
 - LocalSend's Android application is Flutter. Its app package is `org.localsend.localsend_app`; the app uses Dart packages and Flutter plugins. The Rust `packages/core` crate is not declared as a dependency by `app/pubspec.yaml`, so it is not the app's current transfer implementation.
-- LocalSend's current compatibility statement says Android 7.0 minimum; Aerial currently supports Android 5.0. Compatibility must be resolved explicitly rather than silently raising Aerial's minimum SDK.
+- LocalSend's current compatibility statement says Android 7.0 minimum; its Android manifest already declares Leanback and no-touchscreen support, but that does not establish complete D-pad usability. Aerial currently supports Android 5.0. Compatibility must be resolved explicitly rather than silently raising Aerial's minimum SDK.
+- Build-tool baselines differ: Aerial uses Gradle 8.14.3 / AGP 8.12.0 / Kotlin 2.2.10; LocalSend's standalone Android app uses Gradle 8.13 / AGP 8.12.1 / Kotlin 2.2.0. A host integration must use one compatible toolchain, not import the standalone app's Gradle project wholesale.
+- LocalSend's existing Flutter entry point initializes Refena, localization, settings, and the home page; its home tabs include Receive, Send, and Settings. The Android manifest also declares storage/media, foreground data-sync, local-network, and other app-level permissions/services. These need a deliberate merge/registration review; copying the whole manifest would introduce unrelated app identity and launcher configuration.
 
 ## Integration direction
 

@@ -541,9 +541,13 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_pollHttpSer
 /// Accepts selected incoming file IDs, or declines when acceptedFileIdsJson is null.
 #[no_mangle]
 pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_respondPrepareUpload(
-    mut env: JNIEnv, _class: JClass, session: JString, accepted_file_ids_json: JString
+    mut env: JNIEnv, _class: JClass, session: JString, transfer_session: JString, accepted_file_ids_json: JString
 ) -> jstring {
     let session_id = match java_string(&mut env, session) {
+        Ok(value) => value,
+        Err(error) => return return_json(&mut env, json!({"error": error})),
+    };
+    let transfer_session_id = match java_string(&mut env, transfer_session) {
         Ok(value) => value,
         Err(error) => return return_json(&mut env, json!({"error": error})),
     };
@@ -561,7 +565,7 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_respondPrep
     };
 
     let pending = http_servers().lock().unwrap().get(&session_id)
-        .and_then(|server| server.pending_decisions.lock().unwrap().remove(&session_id));
+        .and_then(|server| server.pending_decisions.lock().unwrap().remove(&transfer_session_id));
     match pending {
         Some(sender) => {
             let decision = match decision {
@@ -581,9 +585,13 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_respondPrep
 /// performs the streaming write and SHA-256 verification.
 #[no_mangle]
 pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_acceptFileUpload(
-    mut env: JNIEnv, _class: JClass, session: JString, file_id: JString, destination: JString
+    mut env: JNIEnv, _class: JClass, session: JString, transfer_session: JString, file_id: JString, destination: JString
 ) -> jstring {
     let session_id = match java_string(&mut env, session) {
+        Ok(value) => value,
+        Err(error) => return return_json(&mut env, json!({"error": error})),
+    };
+    let transfer_session_id = match java_string(&mut env, transfer_session) {
         Ok(value) => value,
         Err(error) => return return_json(&mut env, json!({"error": error})),
     };
@@ -606,7 +614,7 @@ pub extern "system" fn Java_app_orchard_tv_localsend_LocalSendNative_acceptFileU
     }
 
     let pending = http_servers().lock().unwrap().get(&session_id)
-        .and_then(|server| server.pending_uploads.lock().unwrap().remove(&(session_id.clone(), file_id.clone())));
+        .and_then(|server| server.pending_uploads.lock().unwrap().remove(&(transfer_session_id, file_id.clone())));
     match pending {
         Some(target_tx) => {
             let (result_tx, _result_rx) = oneshot::channel::<Result<(), String>>();

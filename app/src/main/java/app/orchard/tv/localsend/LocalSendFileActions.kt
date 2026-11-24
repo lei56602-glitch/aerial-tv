@@ -79,7 +79,7 @@ internal object LocalSendFileActions {
         }
         val install = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-        install.clipData = ClipData.newUri(context.contentResolver, apk.name, uri)
+        install.clipData = ClipData.newUri(context.contentResolver, displayName, uri)
         context.startActivity(install)
         return true
     }

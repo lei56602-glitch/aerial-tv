@@ -129,7 +129,6 @@ fun WallpaperSheet(
     onKids: () -> Unit,
     /** Whether Aerial is the home screen or guarded, for the About group. */
     homeStatus: HomeStatus,
-    onLocalSend: () -> Unit,
     /** The sheet is all the way in (true) or not: Home need not draw under it then ([SheetCovers]). */
     onSettled: (Boolean) -> Unit = {},
     /** Draw the closed sheet once, nearly clear, so that its first opening is not its first draw (HomeScreen). */
@@ -308,12 +307,6 @@ fun WallpaperSheet(
                 }
 
                 Spacer(Modifier.height(10.dp))
-                Group(stringResource(R.string.localsend_hint)) { note ->
-                    SettingRow(R.string.localsend_title, stringResource(R.string.localsend_hint), note, first = true) {
-                        ActionChip(stringResource(R.string.localsend_open), Glyph.ChevronRight, onLocalSend)
-                    }
-                }
-
                 Spacer(Modifier.height(22.dp))
                 SectionTitle(R.string.wp_screensaver)
                 Group { note ->

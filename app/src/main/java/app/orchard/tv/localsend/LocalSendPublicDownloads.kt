@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.DocumentsContract
 import android.provider.MediaStore
+import androidx.annotation.RequiresApi
 import androidx.core.content.FileProvider
 import java.io.File
 
@@ -32,6 +33,7 @@ internal object LocalSendPublicDownloads {
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.Q)
     private fun publishWithMediaStore(
         context: Context,
         source: File,
@@ -82,7 +84,7 @@ internal object LocalSendPublicDownloads {
             target = File(directory, displayName.substring(0, dot) + " (" + suffix + ")" + displayName.substring(dot))
             suffix++
         }
-        source.inputStream().use { input -> target.outputStream().use(input::copyTo) }
+        source.inputStream().use { input -> target.outputStream().use { output -> input.copyTo(output) } }
         val fileUri = FileProvider.getUriForFile(
             context,
             "${context.packageName}.localsend.files",

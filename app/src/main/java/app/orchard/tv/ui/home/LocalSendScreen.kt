@@ -1,5 +1,7 @@
 package app.orchard.tv.ui.home
 
+import android.content.Intent
+import android.net.Uri
 import android.provider.OpenableColumns
 import android.os.Environment
 import android.os.ParcelFileDescriptor
@@ -11,12 +13,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -38,6 +42,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -88,6 +94,8 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
     val pendingReceiveFiles = remember { mutableMapOf<String, ReceivedLocalFile>() }
     val activeTransferSession by rememberUpdatedState(transferSession)
     val closeFocusRequester = remember { FocusRequester() }
+    val cancelFocusRequester = remember { FocusRequester() }
+    val qrFocusRequester = remember { FocusRequester() }
 
     BackHandler(onBack = onDismiss)
 
@@ -300,13 +308,20 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
     }
 
     Box(
-        Modifier.fillMaxSize().background(Color(0xE90B1424)).padding(horizontal = 54.dp, vertical = 34.dp),
+        Modifier.fillMaxSize().background(Color(0xE90B1424)).padding(horizontal = 42.dp, vertical = 28.dp),
         contentAlignment = Alignment.Center,
     ) {
+        Row(
+            Modifier.fillMaxSize().focusGroup(),
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
+        ) {
         Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Color(0xF0182940))
-                .focusGroup().verticalScroll(rememberScrollState()).padding(30.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            Modifier.weight(1.45f).fillMaxHeight()
+                .clip(RoundedCornerShape(28.dp)).background(Color(0xF0182940))
+                .focusGroup()
+                .focusProperties { right = qrFocusRequester }
+                .verticalScroll(rememberScrollState()).padding(26.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -339,6 +354,30 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                         } else receiverStatus
                     },
                 )
+                LocalSendAction(
+                    "取消发送",
+                    enabled = transferSession != null,
+                    focusRequester = cancelFocusRequester,
+                ) {
+                    transferSession?.let { id ->
+                        scope.launch {
+                            transferText = "正在取消传输…"
+                            runCatching {
+                                withContext(Dispatchers.IO) {
+                                    val cancelled = runtime.cancelSend(id)
+                                    runtime.releaseSend(id)
+                                    cancelled
+                                }
+                            }.onSuccess { cancelled ->
+                                transferSession = null
+                                transferFileSize = 0L
+                                transferText = if (cancelled) "已取消发送" else "发送任务已结束"
+                            }.onFailure {
+                                transferText = "取消失败：" + (it.message ?: "未知错误")
+                            }
+                        }
+                    }
+                }
             }
             Column(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
@@ -412,36 +451,21 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                     }
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                LocalSendAction("取消传输", enabled = transferSession != null) {
-                    transferSession?.let { id ->
-                        scope.launch {
-                            transferText = "正在取消传输…"
-                            runCatching {
-                                withContext(Dispatchers.IO) {
-                                    val cancelled = runtime.cancelSend(id)
-                                    // The native task owns its cancellation token and finishes its
-                                    // worker independently; release the UI event handle immediately
-                                    // so the TV does not remain stuck in a "transferring" state.
-                                    runtime.releaseSend(id)
-                                    cancelled
-                                }
-                            }.onSuccess { cancelled ->
-                                transferSession = null
-                                transferFileSize = 0L
-                                transferText = if (cancelled) "已取消传输" else "传输任务已结束"
-                            }.onFailure {
-                                transferText = "取消失败：" + (it.message ?: "未知错误")
-                            }
-                        }
-                    }
-                }
-            }
             BasicText(transferText, style = Type.Body.copy(color = Color.White))
             if (lastEvent.isNotBlank()) {
                 BasicText(lastEvent, style = Type.Caption.copy(color = Color(0xFF9FB4C9)), maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
-            LocalSendInstallQrCard()
+        }
+        LocalSendInstallQrCard(
+            focusRequester = qrFocusRequester,
+            onClick = {
+                runCatching {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://localsend.org/zh-CN")))
+                }.onFailure {
+                    status = "无法打开浏览器，请使用手机扫描二维码下载。"
+                }
+            },
+        )
         }
     }
 }
@@ -506,7 +530,10 @@ private fun LocalSendAction(
 
 /** Official cross-platform download entry; avoids hard-coding one phone CPU architecture. */
 @Composable
-private fun LocalSendInstallQrCard() {
+private fun LocalSendInstallQrCard(
+    focusRequester: FocusRequester,
+    onClick: () -> Unit,
+) {
     val qrBitmap by produceState<Bitmap?>(initialValue = null) {
         value = withContext(Dispatchers.Default) {
             val matrix = QRCodeWriter().encode(
@@ -531,26 +558,41 @@ private fun LocalSendInstallQrCard() {
         }
     }
 
-    Column(
-        Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(20.dp))
-            .background(Color(0xFF172F49))
-            .padding(22.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        BasicText("手机端下载 LocalSend", style = Type.Headline.copy(color = Color.White))
-        qrBitmap?.let { bitmap ->
-            Image(
-                bitmap = bitmap.asImageBitmap(),
-                contentDescription = "LocalSend 官方中文下载二维码",
-                modifier = Modifier.width(280.dp).height(280.dp)
-                    .clip(RoundedCornerShape(8.dp)),
+    Pressable(
+        onClick = onClick,
+        modifier = Modifier.weight(0.82f).fillMaxHeight()
+            .focusRequester(focusRequester)
+            ,
+        focusedScale = 1.025f,
+        label = "LocalSend 官方中文客户端下载，按确认键打开下载页面",
+    ) { state ->
+        val shape = RoundedCornerShape(24.dp)
+        Column(
+            Modifier.fillMaxSize()
+                .clip(shape)
+                .background(if (state.focused) Color(0xFF244F78) else Color(0xFF172F49))
+                .border(if (state.focused) 3.dp else 1.dp, if (state.focused) Palette.Focus else Color(0xFF365A7A), shape)
+                .padding(22.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            BasicText("手机端下载 LocalSend", style = Type.Headline.copy(color = Color.White))
+            Spacer(Modifier.height(8.dp))
+            BasicText("使用手机扫码，下载手机版 LocalSend", style = Type.Body.copy(color = Color(0xFFD0E3F5)))
+            Spacer(Modifier.height(18.dp))
+            qrBitmap?.let { bitmap ->
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = "LocalSend 官方中文下载二维码",
+                    modifier = Modifier.width(280.dp).height(280.dp)
+                        .clip(RoundedCornerShape(10.dp)),
+                )
+            }
+            Spacer(Modifier.height(16.dp))
+            BasicText(
+                if (state.focused) "已选中 · 按确认键打开官方下载页面" else "支持手机扫码 · 按确认键也可打开下载页面",
+                style = Type.Body.copy(color = Color.White),
             )
         }
-        BasicText(
-            "使用手机扫码，下载手机版 LocalSend",
-            style = Type.Body.copy(color = Color.White),
-        )
     }
 }

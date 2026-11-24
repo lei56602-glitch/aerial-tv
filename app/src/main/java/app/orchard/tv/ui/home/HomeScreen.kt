@@ -1124,7 +1124,6 @@ fun HomeScreen(
             },
             onKids = vm::setUpKidsMode,
             homeStatus = vm.homeStatus,
-            onLocalSend = { vm.overlay = Overlay.LocalSend },
             onStartScreensaver = {
                 vm.overlay = Overlay.None
                 onStartScreensaver()
@@ -1138,7 +1137,7 @@ fun HomeScreen(
 
         LocalSendScreen(
             visible = overlay is Overlay.LocalSend,
-            onDismiss = { vm.overlay = Overlay.Wallpaper },
+            onDismiss = { vm.overlay = Overlay.ControlCenter() },
         )
 
         val pin = overlay as? Overlay.Pin

@@ -116,9 +116,7 @@ import app.orchard.tv.ui.theme.GlyphIcon
 import app.orchard.tv.ui.theme.Motion
 import app.orchard.tv.ui.theme.Palette
 import app.orchard.tv.ui.theme.Type
-import app.orchard.tv.update.ReleaseNotes
 import app.orchard.tv.update.SelfCompile
-import app.orchard.tv.update.Updates
 import app.orchard.tv.wallpaper.PhoneServer
 import java.time.LocalDateTime
 
@@ -144,11 +142,9 @@ fun ControlCenter(
             CcPage.Main -> onClose()
             CcPage.Inputs -> vm.overlay = Overlay.ControlCenter(CcPage.Main)
             CcPage.InputSettings -> vm.overlay = Overlay.ControlCenter(CcPage.Inputs)
-            CcPage.Update, CcPage.Setup -> vm.overlay = Overlay.ControlCenter(CcPage.Main)
+            CcPage.Setup -> vm.overlay = Overlay.ControlCenter(CcPage.Main)
         }
     }
-
-    LaunchedEffect(visible) { if (visible) Updates.checkIfStale(maxAgeMs = Updates.CONTROL_CENTER_MAX_AGE_MS) }
     // Whether Aerial is the default home, read again each time the panel opens. Recreated after a
     // standby kill, Aerial kept the "not the default home screen" it read while the firmware was
     // still waking, and the activity's polling (MainActivity) never ran: Xiaomi MiTV-AZFP0,
@@ -211,7 +207,6 @@ fun ControlCenter(
                             }
                             CcPage.Inputs -> InputsPage(vm, visible, onOpen)
                             CcPage.InputSettings -> InputSettingsPage(vm, visible)
-                            CcPage.Update -> UpdatePage(vm, visible)
                             CcPage.Setup -> SetupPage(vm, visible, onOpen)
                         }
                     }
@@ -384,6 +379,11 @@ private fun MainPage(
             stringResource(R.string.cc_personalize),
             onClick = { vm.overlay = Overlay.Wallpaper },
         )
+        MenuRow(
+            Glyph.Download,
+            stringResource(R.string.localsend_title),
+            onClick = { vm.overlay = Overlay.LocalSend },
+        )
         // What the TV opens when switched on: easy to forget, and puzzling when it happens.
         vm.bootTargetLabel()?.let { name ->
             MenuRow(
@@ -406,169 +406,6 @@ private fun MainPage(
             MenuRow(Glyph.Shield, stringResource(R.string.cc_setup_title), onClick = { vm.overlay = Overlay.ControlCenter(CcPage.Setup) }, trailing = "›")
         }
 
-        // Only when there is a new version (issue #1606): the version, the home status and the
-        // update check live at the bottom of Personalize, so this page holds controls only.
-        Updates.available?.let { latest ->
-            MenuRow(
-                Glyph.Download,
-                stringResource(R.string.cc_update_to, latest),
-                onClick = { vm.overlay = Overlay.ControlCenter(CcPage.Update) },
-                dot = Palette.Blue,
-                trailing = "›",
-            )
-        }
-    }
-}
-
-/**
- * How to move to the new version: "Download and Install" fetches the APK and opens the system
- * installer (Updates.install). For TVs whose firmware lets no app install another (see
- * Updates.Failure), and for copies older than the button, a QR code opens the website's update
- * page on a phone, with the install command for this TV to copy: typing it off the screen was
- * too much. The TV's address rides in the fragment, which the browser does not send.
- */
-@Composable
-private fun UpdatePage(vm: HomeViewModel, takeFocus: Boolean) {
-    val context = LocalContext.current
-    val first = remember { FocusRequester() }
-    LaunchedEffect(Unit) {
-        if (!takeFocus) return@LaunchedEffect
-        withFrameNanos { }
-        runCatching { first.requestFocus() }
-    }
-    DisposableEffect(Unit) { onDispose { Updates.resetInstall() } }
-    val canInstall = remember { Updates.canInstall(context) }
-    var qr by remember { mutableStateOf<ImageBitmap?>(null) }
-    LaunchedEffect(Unit) {
-        val ip = PhoneServer.lanAddress(context)
-        val url = "https://aerial.qust.me/update/#v=${Updates.current}&f=${BuildConfig.FLAVOR}" + (ip?.let { "&tv=$it" } ?: "")
-        qr = withContext(Dispatchers.Default) { PhoneServer.qr(url).asImageBitmap() }
-    }
-    Column {
-        MenuRow(
-            Glyph.ChevronLeft, stringResource(R.string.cc_update_title, Updates.available ?: Updates.current),
-            focusRequester = if (canInstall) null else first,
-            onClick = { vm.overlay = Overlay.ControlCenter(CcPage.Main) },
-        )
-        if (canInstall) {
-            val state = Updates.install
-            MenuRow(
-                Glyph.Download,
-                when (state) {
-                    is Updates.Install.Downloading -> stringResource(R.string.cc_update_downloading, (state.fraction * 100).toInt())
-                    Updates.Install.Waiting -> stringResource(R.string.cc_update_waiting)
-                    else -> stringResource(R.string.cc_update_install)
-                },
-                focusRequester = first,
-                onClick = { Updates.install(context) },
-            )
-        }
-        Column(Modifier.padding(horizontal = 14.dp)) {
-            Spacer(Modifier.height(10.dp))
-            val status = when (val state = Updates.install) {
-                Updates.Install.Waiting -> stringResource(R.string.cc_update_waiting)
-                Updates.Install.Opened -> stringResource(R.string.cc_update_opened)
-                Updates.Install.NeedsPermission -> stringResource(R.string.cc_update_permission)
-                Updates.Install.NeedsStoragePermission -> stringResource(R.string.cc_update_storage_permission)
-                is Updates.Install.Failed -> stringResource(
-                    when (state.reason) {
-                        Updates.Failure.Download -> R.string.cc_update_failed_download
-                        Updates.Failure.Blocked -> R.string.cc_update_failed_blocked
-                        Updates.Failure.NotOfficial -> R.string.cc_update_failed_signature
-                        Updates.Failure.NotNewer -> R.string.cc_update_failed_older
-                    },
-                )
-                else -> stringResource(R.string.cc_update_current, Updates.current)
-            }
-            BasicText(status, style = Type.Caption)
-        }
-        // Read when the page opens too: the check that found the version may have missed them.
-        LaunchedEffect(Unit) { if (Updates.notes.isEmpty()) Updates.loadNotes() }
-        Updates.notes.takeIf { it.isNotEmpty() }?.let { notes ->
-            Spacer(Modifier.height(10.dp))
-            UpdateNotes(notes)
-        }
-        Column(Modifier.padding(horizontal = 14.dp)) {
-            Spacer(Modifier.height(16.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(104.dp).smoothBackground(Color.White, 12.dp).padding(8.dp)) {
-                    qr?.let { Image(it, contentDescription = null, contentScale = ContentScale.Fit, filterQuality = FilterQuality.None, modifier = Modifier.fillMaxSize()) }
-                }
-                Spacer(Modifier.width(16.dp))
-                Column(Modifier.weight(1f)) {
-                    BasicText(stringResource(if (canInstall) R.string.cc_update_scan_else else R.string.cc_update_scan), style = Type.Body)
-                    Spacer(Modifier.height(6.dp))
-                    BasicText(stringResource(R.string.cc_update_keeps), style = Type.Caption)
-                }
-            }
-        }
-    }
-}
-
-/**
- * What the update brings, release by release. The lines are not controls: focused (Down from the
- * install button), Up and Down scroll it a few lines at a time, and past either end focus moves on
- * as from any row. The panel has room for about ten lines under the install button and above the
- * QR code; a bar on the right shows how much more there is.
- */
-@Composable
-private fun UpdateNotes(notes: List<ReleaseNotes>) {
-    val scroll = rememberScrollState()
-    val scope = rememberCoroutineScope()
-    var focused by remember { mutableStateOf(false) }
-    val step = with(LocalDensity.current) { 64.dp.toPx() }
-    val glow by animateFloatAsState(if (focused) 1f else 0f, tween(140, easing = Motion.EaseOut), label = "notes-focus")
-    val scrollable = scroll.maxValue > 0
-    Box(Modifier.fillMaxWidth()) {
-        Box(Modifier.matchParentSize().graphicsLayer { alpha = glow }.smoothBackground(Palette.Fill, 12.dp))
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .heightIn(max = 164.dp)
-                .onFocusChanged { focused = it.isFocused }
-                .onKeyEvent { e ->
-                    val down = when (e.nativeKeyEvent.keyCode) {
-                        NativeKeyEvent.KEYCODE_DPAD_DOWN -> true
-                        NativeKeyEvent.KEYCODE_DPAD_UP -> false
-                        else -> return@onKeyEvent false
-                    }
-                    if (if (down) scroll.value >= scroll.maxValue else scroll.value <= 0) return@onKeyEvent false
-                    if (e.type == KeyEventType.KeyDown) {
-                        Sounds.step()
-                        scope.launch { scroll.animateScrollBy(if (down) step else -step, spring(dampingRatio = 1f, stiffness = 500f)) }
-                    }
-                    true
-                }
-                .focusProperties { canFocus = scrollable }
-                .focusable()
-                .drawWithContent {
-                    drawContent()
-                    if (scroll.maxValue <= 0) return@drawWithContent
-                    // The scroll bar, inside the right padding.
-                    val track = size.height - 16.dp.toPx()
-                    val thumb = (track * size.height / (size.height + scroll.maxValue)).coerceAtLeast(12.dp.toPx())
-                    val top = 8.dp.toPx() + (track - thumb) * scroll.value / scroll.maxValue
-                    drawRoundRect(
-                        if (focused) Palette.SecondaryLabel else Palette.TertiaryLabel,
-                        topLeft = Offset(size.width - 6.dp.toPx(), top),
-                        size = Size(2.5.dp.toPx(), thumb),
-                        cornerRadius = CornerRadius(1.25.dp.toPx()),
-                    )
-                }
-                .verticalScroll(scroll)
-                .padding(start = 14.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
-        ) {
-            notes.forEachIndexed { i, release ->
-                if (i > 0) Spacer(Modifier.height(10.dp))
-                BasicText(stringResource(R.string.cc_update_notes, release.version), style = Type.Callout.copy(color = Palette.Label))
-                release.changes.forEach { line ->
-                    Row(Modifier.padding(top = 4.dp)) {
-                        BasicText("•", style = Type.Caption, modifier = Modifier.width(10.dp))
-                        BasicText(line, style = Type.Caption, modifier = Modifier.weight(1f))
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -593,7 +430,7 @@ private fun SetupPage(vm: HomeViewModel, takeFocus: Boolean, onOpen: (android.co
     var qr by remember { mutableStateOf<ImageBitmap?>(null) }
     LaunchedEffect(Unit) {
         val ip = PhoneServer.lanAddress(context)
-        val url = "https://aerial.qust.me/update/#setup=1&v=${Updates.current}&f=${BuildConfig.FLAVOR}" + (ip?.let { "&tv=$it" } ?: "")
+        val url = "https://aerial.qust.me/update/#setup=1&f=${BuildConfig.FLAVOR}" + (ip?.let { "&tv=$it" } ?: "")
         qr = withContext(Dispatchers.Default) { PhoneServer.qr(url).asImageBitmap() }
     }
     Column {

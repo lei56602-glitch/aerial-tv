@@ -1,0 +1,3 @@
+[submodule "third_party/localsend"]
+	path = third_party/localsend
+	url = https://github.com/lei56602-glitch/localsend.git

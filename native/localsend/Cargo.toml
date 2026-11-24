@@ -1,0 +1,19 @@
+[package]
+name = "aerial_localsend"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# This crate lives under a LocalSend git submodule in some CI checkouts.
+# Give it its own Cargo workspace so it does not inherit the outer repository workspace.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+jni = "0.21.1"
+localsend = { path = "../../third_party/localsend/packages/core", features = ["full"] }
+serde_json = "1.0.151"
+tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "net", "io-util"] }
+tokio-util = "0.7"

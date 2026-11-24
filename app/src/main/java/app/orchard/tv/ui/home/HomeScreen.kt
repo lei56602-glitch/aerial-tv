@@ -1,5 +1,7 @@
 package app.orchard.tv.ui.home
 
+// CI verification trigger: build latest fork after GitHub Actions re-enabled.
+
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Build
@@ -1122,7 +1124,6 @@ fun HomeScreen(
             },
             onKids = vm::setUpKidsMode,
             homeStatus = vm.homeStatus,
-            onUpdate = { vm.overlay = Overlay.ControlCenter(CcPage.Update) },
             onStartScreensaver = {
                 vm.overlay = Overlay.None
                 onStartScreensaver()
@@ -1132,6 +1133,11 @@ fun HomeScreen(
                 // Kids mode cannot be left without a PIN: it goes with it.
                 else vm.whenUnlocked { AerialSettings.choosePin(null); Restricted.chooseEnabled(false); vm.overlay = Overlay.Wallpaper }
             },
+        )
+
+        LocalSendScreen(
+            visible = overlay is Overlay.LocalSend,
+            onDismiss = { vm.overlay = Overlay.ControlCenter() },
         )
 
         val pin = overlay as? Overlay.Pin

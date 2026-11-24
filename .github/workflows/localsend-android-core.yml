@@ -1,0 +1,90 @@
+name: LocalSend Android core
+# Build validation for the integrated LocalSend JNI and both Aerial TV variants.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "feature/localsend-integration"
+    paths:
+      - ".gitmodules"
+      - "docs/LOCALSEND_INTEGRATION.md"
+      - "native/localsend/**"
+      - "app/src/main/java/app/orchard/tv/localsend/**"
+      - "app/src/main/java/app/orchard/tv/HomeViewModel.kt"
+      - "app/src/main/java/app/orchard/tv/MainActivity.kt"
+      - "app/src/main/java/app/orchard/tv/ui/control/**"
+      - "app/src/main/java/app/orchard/tv/guard/ConfigReceiver.kt"
+      - "app/src/main/java/app/orchard/tv/update/**"
+      - "app/src/main/java/app/orchard/tv/ui/home/**"
+      - "app/src/main/java/app/orchard/tv/ui/wallpaper/**"
+      - "app/src/main/res/values/**"
+      - "app/src/main/AndroidManifest.xml"
+      - ".github/workflows/localsend-android-core.yml"
+  pull_request:
+    paths:
+      - ".gitmodules"
+      - "docs/LOCALSEND_INTEGRATION.md"
+      - "native/localsend/**"
+      - "app/src/main/java/app/orchard/tv/localsend/**"
+      - "app/src/main/java/app/orchard/tv/ui/home/**"
+      - "app/src/main/java/app/orchard/tv/ui/wallpaper/**"
+      - "app/src/main/java/app/orchard/tv/HomeViewModel.kt"
+      - "app/src/main/AndroidManifest.xml"
+      - ".github/workflows/localsend-android-core.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-rust-core:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout Aerial and pinned LocalSend source
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Use preinstalled Android NDK
+        run: |
+          test -d "$ANDROID_NDK_ROOT"
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_ROOT" >> "$GITHUB_ENV"
+
+      - name: Set up Rust and Android target
+        uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Build and stage LocalSend JNI library for Android API 21
+        run: bash native/localsend/build-android.sh arm64-v8a armeabi-v7a x86_64
+
+      - name: Upload staged Android JNI library
+        uses: actions/upload-artifact@v4
+        with:
+          name: aerial-localsend-arm64-api21
+          path: app/src/main/jniLibs/**/libaerial_localsend.so
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Build Aerial TV standard and guard debug APKs
+        run: ./gradlew --no-daemon :app:assembleStandardDebug :app:assembleGuardDebug
+
+      - name: Upload Aerial TV debug APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: aerial-tv-localsend-debug-apks
+          path: |
+            app/build/outputs/apk/standard/debug/*.apk
+            app/build/outputs/apk/guard/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14

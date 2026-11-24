@@ -72,7 +72,6 @@ import androidx.compose.ui.unit.dp
 import app.orchard.tv.BuildConfig
 import app.orchard.tv.R
 import app.orchard.tv.system.HomeStatus
-import app.orchard.tv.update.Updates
 import app.orchard.tv.guard.HomeGuardService
 import app.orchard.tv.settings.AerialSettings
 import app.orchard.tv.settings.ClockHours
@@ -130,8 +129,6 @@ fun WallpaperSheet(
     onKids: () -> Unit,
     /** Whether Aerial is the home screen or guarded, for the About group. */
     homeStatus: HomeStatus,
-    /** Control Center's update page, for a new version. */
-    onUpdate: () -> Unit,
     onLocalSend: () -> Unit,
     /** The sheet is all the way in (true) or not: Home need not draw under it then ([SheetCovers]). */
     onSettled: (Boolean) -> Unit = {},
@@ -418,19 +415,7 @@ fun WallpaperSheet(
                 // About Aerial, last (issue #1606): Control Center shows only a new version.
                 Spacer(Modifier.height(22.dp))
                 SectionTitle(R.string.cc_about)
-                Group(stringResource(R.string.cc_about_version, Updates.current) + " · " + BuildConfig.FLAVOR) { note ->
-                    val latest = Updates.available
-                    SettingRow(R.string.cc_about_update, null, note, first = true) {
-                        // Now the last row that takes focus: bring the note under it into view too.
-                        Box(Modifier.onFocusChanged { if (it.hasFocus) scope.launch { scroll.animateScrollTo(scroll.maxValue) } }) {
-                            ActionChip(
-                                latest?.let { stringResource(R.string.cc_update_to, it) } ?: stringResource(R.string.cc_about_latest),
-                                Glyph.ChevronRight,
-                                // Nothing newer known: look again now.
-                                onClick = { if (latest != null) onUpdate() else Updates.checkIfStale(force = true) },
-                            )
-                        }
-                    }
+                Group(stringResource(R.string.cc_about_version, BuildConfig.VERSION_NAME) + " · " + BuildConfig.FLAVOR) { _ ->
                     val (dot, label) = when (homeStatus) {
                         HomeStatus.Default -> Palette.Green to R.string.cc_home_default
                         HomeStatus.Guarded -> Palette.Green to R.string.cc_home_guarded

@@ -379,6 +379,11 @@ private fun MainPage(
             stringResource(R.string.cc_personalize),
             onClick = { vm.overlay = Overlay.Wallpaper },
         )
+        MenuRow(
+            Glyph.Download,
+            stringResource(R.string.localsend_title),
+            onClick = { vm.overlay = Overlay.LocalSend },
+        )
         // What the TV opens when switched on: easy to forget, and puzzling when it happens.
         vm.bootTargetLabel()?.let { name ->
             MenuRow(

@@ -79,11 +79,9 @@ object SelfCompile {
         Build.VERSION.SDK_INT in 24..30 && !askedSystemThisInstall(context) && uncompiled(context)
 
     /** Whether reinstalling would help: Android 9+, the official package, uncompiled, metadata in the APK, not tried for this version. */
-    private fun worthIt(context: Context): Boolean {
-        if (Build.VERSION.SDK_INT < 28 || !Updates.canInstall(context) || triedThisVersion(context)) return false
-        val odex = odexBytes(context) ?: return false
-        return odex < COMPILED_BYTES && Updates.ownDexMetadata(context) != null
-    }
+    // Self-reinstallation depended on the removed upstream APK installer. Keep the independent
+    // PackageManager dex compilation path, but never offer or trigger an APK reinstall.
+    private fun worthIt(context: Context): Boolean = false
 
     /** Once per process, off the main thread (it reads the APK): is Aerial uncompiled? */
     fun init(context: Context) {

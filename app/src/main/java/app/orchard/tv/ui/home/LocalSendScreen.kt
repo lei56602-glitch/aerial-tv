@@ -9,6 +9,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -35,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -76,8 +78,14 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
     var transferFileSize by remember { mutableStateOf(0L) }
     var incomingRequest by remember { mutableStateOf<IncomingLocalRequest?>(null) }
     val activeTransferSession by rememberUpdatedState(transferSession)
+    val closeFocusRequester = remember { FocusRequester() }
 
     BackHandler(onBack = onDismiss)
+
+    // Give TV remotes a deterministic starting point instead of relying on firmware focus heuristics.
+    LaunchedEffect(Unit) {
+        closeFocusRequester.requestFocus()
+    }
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val target = selected ?: return@rememberLauncherForActivityResult
@@ -253,7 +261,7 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
     ) {
         Column(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Color(0xF0182940))
-                .verticalScroll(rememberScrollState()).padding(30.dp),
+                .focusGroup().verticalScroll(rememberScrollState()).padding(30.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -262,7 +270,7 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                     Spacer(Modifier.height(5.dp))
                     BasicText(status, style = Type.Caption.copy(color = Color(0xFFB7C8DA)), maxLines = 2)
                 }
-                LocalSendAction("关闭", onClick = onDismiss)
+                LocalSendAction("关闭", focusRequester = closeFocusRequester, onClick = onDismiss)
             }
             BasicText("附近设备（${peers.size}）", style = Type.Headline.copy(color = Color.White))
             if (peers.isEmpty()) {
@@ -345,8 +353,18 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
 }
 
 @Composable
-private fun LocalSendAction(label: String, enabled: Boolean = true, onClick: () -> Unit) {
-    Pressable(onClick = onClick, enabled = enabled, focusedScale = 1.04f) { state ->
+private fun LocalSendAction(
+    label: String,
+    enabled: Boolean = true,
+    focusRequester: FocusRequester? = null,
+    onClick: () -> Unit,
+) {
+    Pressable(
+        onClick = onClick,
+        enabled = enabled,
+        focusRequester = focusRequester,
+        focusedScale = 1.04f,
+    ) { state ->
         val background = when {
             !enabled -> Color(0xFF35475A)
             state.focused -> Palette.Focus

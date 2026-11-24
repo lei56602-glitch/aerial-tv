@@ -325,11 +325,22 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                     transferSession?.let { id ->
                         scope.launch {
                             transferText = "正在取消传输…"
-                            runCatching { withContext(Dispatchers.IO) { runtime.cancelSend(id) } }
-                                .onSuccess { cancelled ->
-                                    transferText = if (cancelled) "已发送取消指令，正在等待传输停止" else "传输任务已结束"
+                            runCatching {
+                                withContext(Dispatchers.IO) {
+                                    val cancelled = runtime.cancelSend(id)
+                                    // The native task owns its cancellation token and finishes its
+                                    // worker independently; release the UI event handle immediately
+                                    // so the TV does not remain stuck in a "transferring" state.
+                                    runtime.releaseSend(id)
+                                    cancelled
                                 }
-                                .onFailure { transferText = "取消失败：" + (it.message ?: "未知错误") }
+                            }.onSuccess { cancelled ->
+                                transferSession = null
+                                transferFileSize = 0L
+                                transferText = if (cancelled) "已取消传输" else "传输任务已结束"
+                            }.onFailure {
+                                transferText = "取消失败：" + (it.message ?: "未知错误")
+                            }
                         }
                     }
                 }

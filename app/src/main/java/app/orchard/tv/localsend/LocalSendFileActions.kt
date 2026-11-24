@@ -41,7 +41,8 @@ internal object LocalSendFileActions {
         throw lastError ?: IllegalStateException("电视没有可用的文件管理器")
     }
 
-    fun installApk(context: Context, apk: File) {
+    /** Returns false when the user must first grant unknown-app install permission in Settings. */
+    fun installApk(context: Context, apk: File): Boolean {
         require(apk.isFile && apk.exists() && apk.extension.equals("apk", ignoreCase = true)) {
             "APK 文件不存在或格式不正确"
         }
@@ -51,12 +52,13 @@ internal object LocalSendFileActions {
                 Uri.parse("package:${context.packageName}")
             ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(settings)
-            return
+            return false
         }
         val uri = contentUri(context, apk)
         val install = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         install.clipData = ClipData.newUri(context.contentResolver, apk.name, uri)
         context.startActivity(install)
+        return true
     }
 }

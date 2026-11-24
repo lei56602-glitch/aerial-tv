@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.DocumentsContract
 import android.provider.MediaStore
+import androidx.core.content.FileProvider
 import java.io.File
 
 /**
@@ -82,9 +83,19 @@ internal object LocalSendPublicDownloads {
             suffix++
         }
         source.inputStream().use { input -> target.outputStream().use(input::copyTo) }
+        val fileUri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.localsend.files",
+            target,
+        )
+        val directoryUri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.localsend.files",
+            directory,
+        )
         return PublishedFile(
-            Uri.fromFile(target),
-            null,
+            fileUri,
+            directoryUri,
             "内部存储/Download/LocalSend/${target.name}",
             target
         )

@@ -4,6 +4,7 @@ import android.provider.OpenableColumns
 import android.os.Environment
 import android.os.ParcelFileDescriptor
 import android.graphics.Bitmap
+import android.webkit.MimeTypeMap
 import java.io.File
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -43,6 +44,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.runtime.mutableStateListOf
 import app.orchard.tv.localsend.LocalSendPeer
 import app.orchard.tv.localsend.LocalSendPeerChannel
 import app.orchard.tv.localsend.LocalSendRuntime
@@ -63,6 +66,7 @@ import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 
 private data class IncomingLocalFile(val id: String, val name: String, val size: Long)
 private data class IncomingLocalRequest(val sessionId: String, val sender: String, val files: List<IncomingLocalFile>)
+private data class ReceivedLocalFile(val name: String, val path: String, val mimeType: String, val size: Long)
 
 @Composable
 internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
@@ -79,6 +83,8 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
     var lastEvent by remember { mutableStateOf("") }
     var transferFileSize by remember { mutableStateOf(0L) }
     var incomingRequest by remember { mutableStateOf<IncomingLocalRequest?>(null) }
+    val completedReceiveQueue = remember { mutableStateListOf<ReceivedLocalFile>() }
+    val pendingReceiveFiles = remember { mutableMapOf<String, ReceivedLocalFile>() }
     val activeTransferSession by rememberUpdatedState(transferSession)
     val closeFocusRequester = remember { FocusRequester() }
 
@@ -226,6 +232,10 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                                 runtime.acceptIncomingFile(sessionId, fileId, output.absolutePath)
                                 output.absolutePath
                             }
+                            val extension = safeName.substringAfterLast(".", "").lowercase()
+                            val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension)
+                                ?: "application/octet-stream"
+                            pendingReceiveFiles["$sessionId|$fileId"] = ReceivedLocalFile(safeName, destination, mimeType, item.optLong("size"))
                             transferText = "正在接收：" + safeName
                             lastEvent = "保存位置：" + destination
                         }
@@ -236,7 +246,14 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                             }
                         }
                         "fileUploadComplete" -> {
-                            transferText = if (event.optBoolean("success")) "文件接收完成" else "文件接收失败：" + event.optString("error", "未知错误")
+                            val key = event.optString("sessionId") + "|" + event.optString("fileId")
+                            val received = pendingReceiveFiles.remove(key)
+                            if (event.optBoolean("success")) {
+                                transferText = "文件接收完成：" + (received?.name ?: "文件")
+                                if (received != null) completedReceiveQueue.add(received)
+                            } else {
+                                transferText = "文件接收失败：" + event.optString("error", "未知错误")
+                            }
                         }
                         "prepareUploadAborted" -> {
                             incomingRequest = null
@@ -257,6 +274,28 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
             }
             delay(700)
         }
+    }
+
+    completedReceiveQueue.firstOrNull()?.let { received ->
+        LocalSendReceivedDialog(
+            file = received,
+            onDismiss = { completedReceiveQueue.removeAt(0) },
+            onOpenFile = {
+                runCatching { LocalSendFileActions.openFile(context, File(received.path), received.mimeType) }
+                    .onSuccess { completedReceiveQueue.removeAt(0) }
+                    .onFailure { transferText = "无法打开文件：" + (it.message ?: "电视没有可用的对应应用") }
+            },
+            onOpenFolder = {
+                runCatching { LocalSendFileActions.openFolder(context, File(received.path).parentFile ?: context.filesDir) }
+                    .onSuccess { completedReceiveQueue.removeAt(0) }
+                    .onFailure { transferText = "无法打开目录：" + (it.message ?: "电视没有可用的文件管理器") }
+            },
+            onInstall = {
+                runCatching { LocalSendFileActions.installApk(context, File(received.path)) }
+                    .onSuccess { completedReceiveQueue.removeAt(0) }
+                    .onFailure { transferText = "无法启动安装程序：" + (it.message ?: "请检查安装权限") }
+            },
+        )
     }
 
     Box(
@@ -382,6 +421,35 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                 BasicText(lastEvent, style = Type.Caption.copy(color = Color(0xFF9FB4C9)), maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             LocalSendInstallQrCard()
+        }
+    }
+}
+
+
+@Composable
+private fun LocalSendReceivedDialog(
+    file: ReceivedLocalFile,
+    onDismiss: () -> Unit,
+    onOpenFile: () -> Unit,
+    onOpenFolder: () -> Unit,
+    onInstall: () -> Unit,
+) {
+    val isApk = file.name.endsWith(".apk", ignoreCase = true)
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp))
+                .background(Color(0xFF182B40)).padding(26.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            BasicText("文件接收完成", style = Type.LargeTitle.copy(color = Color.White))
+            BasicText(file.name, style = Type.Headline.copy(color = Color(0xFF9ED0FF)), maxLines = 2)
+            BasicText("保存位置：\n" + file.path, style = Type.Caption.copy(color = Color(0xFFCAD8E6)), maxLines = 3)
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                LocalSendAction("打开目录", onClick = onOpenFolder)
+                if (isApk) LocalSendAction("安装应用", onClick = onInstall)
+                else LocalSendAction("打开文件", onClick = onOpenFile)
+            }
+            LocalSendAction("稍后处理", onClick = onDismiss)
         }
     }
 }

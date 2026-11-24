@@ -73,6 +73,7 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
     var peers by remember { mutableStateOf<List<LocalSendPeer>>(emptyList()) }
     var selected by remember { mutableStateOf<Pair<LocalSendPeer, LocalSendPeerChannel>?>(null) }
     var status by remember { mutableStateOf("正在启动局域网发现…") }
+    var receiverStatus by remember { mutableStateOf("接收服务正在启动…") }
     var transferSession by remember { mutableStateOf<String?>(null) }
     var transferText by remember { mutableStateOf("尚未发送文件") }
     var lastEvent by remember { mutableStateOf("") }
@@ -140,7 +141,8 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
     LaunchedEffect(runtime) {
         try {
             withContext(Dispatchers.IO) {
-                runtime.startHttpServer()
+                val receivePort = runtime.startHttpServer()
+                receiverStatus = "接收服务已开启 · 端口 $receivePort"
                 runtime.startDiscovery()
             }
             status = "正在搜索同一局域网内的 LocalSend 设备"
@@ -170,6 +172,7 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                 delay(900)
             }
         } catch (error: Throwable) {
+            receiverStatus = "接收服务启动失败：${error.message ?: "未知错误"}"
             status = "LocalSend 启动失败：${error.message ?: "请检查网络"}"
         } finally {
             withContext(NonCancellable + Dispatchers.IO) {
@@ -272,6 +275,18 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                     BasicText(status, style = Type.Caption.copy(color = Color(0xFFB7C8DA)), maxLines = 2)
                 }
                 LocalSendAction("关闭", focusRequester = closeFocusRequester, onClick = onDismiss)
+            }
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xFF173B38)).padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(7.dp),
+            ) {
+                BasicText("接收文件", style = Type.Headline.copy(color = Color.White))
+                BasicText(receiverStatus, style = Type.Body.copy(color = Color(0xFF9EF0C5)))
+                BasicText(
+                    "手机或电脑打开 LocalSend，选择发送并点选这台电视。收到请求后，这里会出现“接收文件 / 拒绝”按钮。",
+                    style = Type.Body.copy(color = Color(0xFFD0E8DF)),
+                )
             }
             BasicText("附近设备（${peers.size}）", style = Type.Headline.copy(color = Color.White))
             if (peers.isEmpty()) {

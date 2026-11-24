@@ -322,10 +322,13 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
             ) {
                 LocalSendAction(
                     "发送文件",
-                    enabled = selected != null && transferSession == null,
                     onClick = {
-                        runCatching { picker.launch("*/*") }
-                            .onFailure { status = "电视文件选择器无法启动：" + (it.message ?: "系统未提供文件选择界面") }
+                        when {
+                            transferSession != null -> status = "当前有文件正在发送，请等待完成或取消后再发送。"
+                            selected == null -> status = "请先在下方“附近设备”中选择接收文件的设备。"
+                            else -> runCatching { picker.launch("*/*") }
+                                .onFailure { status = "电视文件选择器无法启动：" + (it.message ?: "系统未提供文件选择界面") }
+                        }
                     },
                 )
                 LocalSendAction(

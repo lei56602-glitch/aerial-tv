@@ -28,6 +28,7 @@ on:
       - "native/localsend/**"
       - "app/src/main/java/app/orchard/tv/localsend/**"
       - "app/src/main/java/app/orchard/tv/ui/home/**"
+      - "app/src/main/java/app/orchard/tv/ui/wallpaper/**"
       - "app/src/main/java/app/orchard/tv/HomeViewModel.kt"
       - "app/src/main/AndroidManifest.xml"
       - ".github/workflows/localsend-android-core.yml"

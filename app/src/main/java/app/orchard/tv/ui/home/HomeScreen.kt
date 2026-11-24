@@ -1,5 +1,7 @@
 package app.orchard.tv.ui.home
 
+// CI verification trigger: updater entry points have been removed from this fork.
+
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Build

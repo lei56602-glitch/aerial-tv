@@ -310,11 +310,32 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    BasicText("LocalSend · 局域网传输", style = Type.LargeTitle.copy(color = Color.White))
+                    BasicText("文件传输", style = Type.LargeTitle.copy(color = Color.White))
                     Spacer(Modifier.height(5.dp))
                     BasicText(status, style = Type.Caption.copy(color = Color(0xFFB7C8DA)), maxLines = 2)
                 }
                 LocalSendAction("关闭", focusRequester = closeFocusRequester, onClick = onDismiss)
+            }
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                LocalSendAction(
+                    "发送文件",
+                    enabled = selected != null && transferSession == null,
+                    onClick = {
+                        runCatching { picker.launch("*/*") }
+                            .onFailure { status = "电视文件选择器无法启动：" + (it.message ?: "系统未提供文件选择界面") }
+                    },
+                )
+                LocalSendAction(
+                    "接收文件",
+                    onClick = {
+                        transferText = if (receiverStatus.startsWith("接收服务已开启")) {
+                            "接收服务已开启，手机或电脑可在 LocalSend 中选择这台电视发送文件。"
+                        } else receiverStatus
+                    },
+                )
             }
             Column(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
@@ -389,10 +410,6 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                LocalSendAction("选择文件并发送", enabled = selected != null && transferSession == null) {
-                    runCatching { picker.launch("*/*") }
-                        .onFailure { status = "电视文件选择器无法启动：" + (it.message ?: "系统未提供文件选择界面") }
-                }
                 LocalSendAction("取消传输", enabled = transferSession != null) {
                     transferSession?.let { id ->
                         scope.launch {
@@ -490,72 +507,47 @@ private fun LocalSendInstallQrCard() {
     val qrBitmap by produceState<Bitmap?>(initialValue = null) {
         value = withContext(Dispatchers.Default) {
             val matrix = QRCodeWriter().encode(
-                "https://localsend.org/",
+                "https://localsend.org/zh-CN",
                 BarcodeFormat.QR_CODE,
-                280,
-                280,
+                420,
+                420,
                 mapOf(
                     EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
-                    EncodeHintType.MARGIN to 2,
+                    EncodeHintType.MARGIN to 3,
                 ),
             )
-            val pixels = IntArray(280 * 280)
-            for (y in 0 until 280) {
-                for (x in 0 until 280) {
-                    pixels[y * 280 + x] = if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+            val pixels = IntArray(420 * 420)
+            for (y in 0 until 420) {
+                for (x in 0 until 420) {
+                    pixels[y * 420 + x] = if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE
                 }
             }
-            Bitmap.createBitmap(280, 280, Bitmap.Config.ARGB_8888).apply {
-                setPixels(pixels, 0, 280, 0, 0, 280, 280)
+            Bitmap.createBitmap(420, 420, Bitmap.Config.ARGB_8888).apply {
+                setPixels(pixels, 0, 420, 0, 0, 420, 420)
             }
         }
     }
 
-    Row(
+    Column(
         Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
+            .clip(RoundedCornerShape(20.dp))
             .background(Color(0xFF172F49))
-            .padding(18.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(22.dp),
+            .padding(22.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
+        BasicText("手机端下载 LocalSend", style = Type.Headline.copy(color = Color.White))
         qrBitmap?.let { bitmap ->
             Image(
                 bitmap = bitmap.asImageBitmap(),
-                contentDescription = "LocalSend 官方下载二维码",
-                modifier = Modifier.width(150.dp).height(150.dp)
+                contentDescription = "LocalSend 官方中文下载二维码",
+                modifier = Modifier.width(280.dp).height(280.dp)
                     .clip(RoundedCornerShape(8.dp)),
             )
         }
-        Column(
-            Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(7.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Box(
-                    Modifier.width(34.dp).height(34.dp)
-                        .clip(RoundedCornerShape(9.dp))
-                        .background(Color(0xFF2878D0)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    BasicText("↔", style = Type.Headline.copy(color = Color.White))
-                }
-                BasicText("手机扫码安装 LocalSend", style = Type.Headline.copy(color = Color.White))
-            }
-            BasicText(
-                "免费 · 开源 · 局域网传输",
-                style = Type.Body.copy(color = Color(0xFF8FC7FF)),
-            )
-            BasicText(
-                "手机安装后，与电视连接同一 Wi-Fi，即可互相传输文件。",
-                style = Type.Body.copy(color = Color(0xFFD0DCE8)),
-                maxLines = 2,
-            )
-            BasicText(
-                "二维码打开 LocalSend 官方下载页，可选择 Android、iOS 等对应版本。",
-                style = Type.Caption.copy(color = Color(0xFF9FB4C9)),
-                maxLines = 2,
-            )
-        }
+        BasicText(
+            "使用手机扫码，下载手机版 LocalSend",
+            style = Type.Body.copy(color = Color.White),
+        )
     }
 }

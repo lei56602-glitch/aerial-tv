@@ -184,13 +184,10 @@ object SelfCompile {
     }
 
     /** From Control Center's row (Android 9 to 11), or by itself on 12+ ([auto]). */
+    /** APK self-reinstallation is disabled with the upstream updater; system dex compilation remains available. */
     fun run(context: Context, auto: Boolean) {
-        val app = context.applicationContext
-        prefs(app).edit { putLong(KEY_TRIED, BuildConfig.VERSION_CODE.toLong()) }
         offered = false
-        Log.i(TAG, "self compile: reinstalling (${if (auto) "auto" else "asked"}), odex ${odexBytes(app)} bytes")
-        DiagLog.i("self compile: reinstalling (${if (auto) "auto" else "asked"})")
-        if (Build.VERSION.SDK_INT >= 28) Updates.reinstallSelf(app, auto)
+        DiagLog.i("self compile: APK self-reinstallation disabled")
     }
 
     /** ConfigReceiver's system_compile: ask the package manager now, whether asked or not (for testing on a TV). */

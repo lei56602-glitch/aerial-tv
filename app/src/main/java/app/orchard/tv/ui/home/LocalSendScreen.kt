@@ -288,6 +288,38 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                     style = Type.Body.copy(color = Color(0xFFD0E8DF)),
                 )
             }
+            incomingRequest?.let { request ->
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color(0xFF5A3A26)).padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    BasicText("收到来自 " + request.sender + " 的文件请求", style = Type.Headline.copy(color = Color.White))
+                    request.files.forEach { file ->
+                        BasicText(file.name + " · " + file.size + " 字节", style = Type.Body.copy(color = Color.White))
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        LocalSendAction("接收文件", onClick = {
+                            val pending = incomingRequest ?: return@LocalSendAction
+                            scope.launch {
+                                runCatching {
+                                    withContext(Dispatchers.IO) {
+                                        runtime.respondToIncomingFiles(pending.sessionId, pending.files.map { it.id })
+                                    }
+                                }.onSuccess { transferText = "已同意接收，正在准备文件" }
+                                    .onFailure { transferText = "接收请求失败：" + it.message }
+                            }
+                            incomingRequest = null
+                        })
+                        LocalSendAction("拒绝", onClick = {
+                            val pending = incomingRequest ?: return@LocalSendAction
+                            scope.launch(Dispatchers.IO) {
+                                runCatching { runtime.respondToIncomingFiles(pending.sessionId, null) }
+                            }
+                            incomingRequest = null
+                        })
+                    }
+                }
+            }
             BasicText("附近设备（${peers.size}）", style = Type.Headline.copy(color = Color.White))
             if (peers.isEmpty()) {
                 BasicText("暂未发现设备。请确认电视与手机或电脑连接同一个局域网，并打开 LocalSend。", style = Type.Body.copy(color = Color(0xFFD0DCE8)))
@@ -342,38 +374,6 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                                 transferText = "取消失败：" + (it.message ?: "未知错误")
                             }
                         }
-                    }
-                }
-            }
-            incomingRequest?.let { request ->
-                Column(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color(0xFF5A3A26)).padding(18.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    BasicText("收到来自 " + request.sender + " 的文件请求", style = Type.Headline.copy(color = Color.White))
-                    request.files.forEach { file ->
-                        BasicText(file.name + " · " + file.size + " 字节", style = Type.Body.copy(color = Color.White))
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        LocalSendAction("接收文件", onClick = {
-                            val pending = incomingRequest ?: return@LocalSendAction
-                            scope.launch {
-                                runCatching {
-                                    withContext(Dispatchers.IO) {
-                                        runtime.respondToIncomingFiles(pending.sessionId, pending.files.map { it.id })
-                                    }
-                                }.onSuccess { transferText = "已同意接收，正在准备文件" }
-                                    .onFailure { transferText = "接收请求失败：" + it.message }
-                            }
-                            incomingRequest = null
-                        })
-                        LocalSendAction("拒绝", onClick = {
-                            val pending = incomingRequest ?: return@LocalSendAction
-                            scope.launch(Dispatchers.IO) {
-                                runCatching { runtime.respondToIncomingFiles(pending.sessionId, null) }
-                            }
-                            incomingRequest = null
-                        })
                     }
                 }
             }

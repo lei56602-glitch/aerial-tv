@@ -457,7 +457,9 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
             }
         }
         LocalSendInstallQrCard(
+            modifier = Modifier.weight(0.82f).fillMaxHeight(),
             focusRequester = qrFocusRequester,
+            leftFocusRequester = cancelFocusRequester,
             onClick = {
                 runCatching {
                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://localsend.org/zh-CN")))
@@ -531,7 +533,9 @@ private fun LocalSendAction(
 /** Official cross-platform download entry; avoids hard-coding one phone CPU architecture. */
 @Composable
 private fun LocalSendInstallQrCard(
+    modifier: Modifier,
     focusRequester: FocusRequester,
+    leftFocusRequester: FocusRequester,
     onClick: () -> Unit,
 ) {
     val qrBitmap by produceState<Bitmap?>(initialValue = null) {
@@ -560,9 +564,9 @@ private fun LocalSendInstallQrCard(
 
     Pressable(
         onClick = onClick,
-        modifier = Modifier.weight(0.82f).fillMaxHeight()
+        modifier = modifier
             .focusRequester(focusRequester)
-            ,
+            .focusProperties { left = leftFocusRequester },
         focusedScale = 1.025f,
         label = "LocalSend 官方中文客户端下载，按确认键打开下载页面",
     ) { state ->

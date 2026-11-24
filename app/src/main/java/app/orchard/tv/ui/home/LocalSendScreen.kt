@@ -73,7 +73,14 @@ import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 
 private data class IncomingLocalFile(val id: String, val name: String, val size: Long)
 private data class IncomingLocalRequest(val sessionId: String, val sender: String, val files: List<IncomingLocalFile>)
-private data class ReceivedLocalFile(val name: String, val path: String, val mimeType: String, val size: Long)
+private data class ReceivedLocalFile(
+    val name: String,
+    val path: String,
+    val mimeType: String,
+    val size: Long,
+    val publicUri: Uri? = null,
+    val folderUri: Uri? = null,
+)
 
 @Composable
 internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
@@ -229,7 +236,8 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                             val safeName = candidateName.takeUnless { it.isBlank() || it == "." || it == ".." }
                                 ?: "received_file"
                             val destination = withContext(Dispatchers.IO) {
-                                val directory = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: File(context.filesDir, "Downloads")
+                                val directory = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
+                                    ?: File(context.filesDir, "Downloads")
                                 directory.mkdirs()
                                 var output = File(directory, safeName)
                                 var suffix = 1
@@ -259,7 +267,33 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
                             val received = pendingReceiveFiles.remove(key)
                             if (event.optBoolean("success")) {
                                 transferText = "文件接收完成：" + (received?.name ?: "文件")
-                                if (received != null) completedReceiveQueue.add(received)
+                                if (received != null) {
+                                    runCatching {
+                                        withContext(Dispatchers.IO) {
+                                            LocalSendPublicDownloads.publish(
+                                                context,
+                                                File(received.path),
+                                                received.name,
+                                                received.mimeType,
+                                            )
+                                        }
+                                    }.onSuccess { published ->
+                                        completedReceiveQueue.add(
+                                            received.copy(
+                                                path = published.displayPath,
+                                                publicUri = published.uri,
+                                                folderUri = published.folderUri,
+                                            )
+                                        )
+                                        runCatching { File(received.path).delete() }
+                                        transferText = "已保存到公共目录：${published.displayPath}"
+                                        lastEvent = "保存位置：${published.displayPath}"
+                                    }.onFailure { error ->
+                                        completedReceiveQueue.add(received)
+                                        transferText = "公共目录保存失败，文件暂存于应用目录：" +
+                                            (error.message ?: "未知错误")
+                                    }
+                                }
                             } else {
                                 transferText = "文件接收失败：" + event.optString("error", "未知错误")
                             }
@@ -290,17 +324,35 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
             file = received,
             onDismiss = { completedReceiveQueue.removeAt(0) },
             onOpenFile = {
-                runCatching { LocalSendFileActions.openFile(context, File(received.path), received.mimeType) }
+                runCatching {
+                    if (received.publicUri != null) {
+                        LocalSendFileActions.openFile(context, received.publicUri, received.name, received.mimeType)
+                    } else {
+                        LocalSendFileActions.openFile(context, File(received.path), received.mimeType)
+                    }
+                }
                     .onSuccess { completedReceiveQueue.removeAt(0) }
                     .onFailure { transferText = "无法打开文件：" + (it.message ?: "电视没有可用的对应应用") }
             },
             onOpenFolder = {
-                runCatching { LocalSendFileActions.openFolder(context, File(received.path).parentFile ?: context.filesDir) }
+                runCatching {
+                    if (received.folderUri != null) {
+                        LocalSendFileActions.openFolder(context, received.folderUri)
+                    } else {
+                        LocalSendFileActions.openFolder(context, File(received.path).parentFile ?: context.filesDir)
+                    }
+                }
                     .onSuccess { completedReceiveQueue.removeAt(0) }
                     .onFailure { transferText = "无法打开目录：" + (it.message ?: "电视没有可用的文件管理器") }
             },
             onInstall = {
-                runCatching { LocalSendFileActions.installApk(context, File(received.path)) }
+                runCatching {
+                    if (received.publicUri != null) {
+                        LocalSendFileActions.installApk(context, received.publicUri, received.name)
+                    } else {
+                        LocalSendFileActions.installApk(context, File(received.path))
+                    }
+                }
                     .onSuccess { launched -> if (launched) completedReceiveQueue.removeAt(0) }
                     .onFailure { transferText = "无法启动安装程序：" + (it.message ?: "请检查安装权限") }
             },

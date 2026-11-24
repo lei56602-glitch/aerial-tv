@@ -87,7 +87,7 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
         closeFocusRequester.requestFocus()
     }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         val target = selected ?: return@rememberLauncherForActivityResult
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
@@ -302,12 +302,19 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 LocalSendAction("选择文件并发送", enabled = selected != null && transferSession == null) {
-                    picker.launch(arrayOf("*/*"))
+                    runCatching { picker.launch("*/*") }
+                        .onFailure { status = "电视文件选择器无法启动：" + (it.message ?: "系统未提供文件选择界面") }
                 }
                 LocalSendAction("取消传输", enabled = transferSession != null) {
                     transferSession?.let { id ->
-                        scope.launch(Dispatchers.IO) { runtime.cancelSend(id) }
-                        transferText = "已请求取消传输"
+                        scope.launch {
+                            transferText = "正在取消传输…"
+                            runCatching { withContext(Dispatchers.IO) { runtime.cancelSend(id) } }
+                                .onSuccess { cancelled ->
+                                    transferText = if (cancelled) "已发送取消指令，正在等待传输停止" else "传输任务已结束"
+                                }
+                                .onFailure { transferText = "取消失败：" + (it.message ?: "未知错误") }
+                        }
                     }
                 }
             }

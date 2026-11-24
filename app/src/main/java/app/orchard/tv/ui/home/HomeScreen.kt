@@ -1122,7 +1122,6 @@ fun HomeScreen(
             },
             onKids = vm::setUpKidsMode,
             homeStatus = vm.homeStatus,
-            onUpdate = { vm.overlay = Overlay.ControlCenter(CcPage.Update) },
             onLocalSend = { vm.overlay = Overlay.LocalSend },
             onStartScreensaver = {
                 vm.overlay = Overlay.None

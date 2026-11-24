@@ -330,7 +330,10 @@ fun WallpaperSheet(
                         note, first = true,
                     ) { ScreensaverChoice(onStartScreensaver) }
                     // Only the qualities this TV can play; a 1080p-only TV has nothing to choose.
-                    val qualities = remember { AerialFormats.supported(context) }
+                    val qualities by produceState(initialValue = emptyList<AerialQuality>(), context) {
+                        // Codec enumeration can stall older TV firmware; never do it during UI composition.
+                        value = withContext(Dispatchers.Default) { AerialFormats.supported(context) }
+                    }
                     if (qualities.size > 1) {
                         // The films kept on the TV (AerialSet, AerialStream): how many, how much
                         // space at most, and how they change. In place of the quality's own note,

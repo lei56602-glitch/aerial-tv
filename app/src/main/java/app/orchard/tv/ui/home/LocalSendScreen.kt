@@ -49,6 +49,7 @@ import androidx.compose.runtime.mutableStateListOf
 import app.orchard.tv.localsend.LocalSendPeer
 import app.orchard.tv.localsend.LocalSendPeerChannel
 import app.orchard.tv.localsend.LocalSendRuntime
+import app.orchard.tv.localsend.LocalSendFileActions
 import app.orchard.tv.ui.components.Pressable
 import app.orchard.tv.ui.theme.Palette
 import app.orchard.tv.ui.theme.Type

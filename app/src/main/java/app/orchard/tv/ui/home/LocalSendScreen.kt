@@ -292,7 +292,7 @@ internal fun LocalSendScreen(visible: Boolean, onDismiss: () -> Unit) {
             },
             onInstall = {
                 runCatching { LocalSendFileActions.installApk(context, File(received.path)) }
-                    .onSuccess { completedReceiveQueue.removeAt(0) }
+                    .onSuccess { launched -> if (launched) completedReceiveQueue.removeAt(0) }
                     .onFailure { transferText = "无法启动安装程序：" + (it.message ?: "请检查安装权限") }
             },
         )

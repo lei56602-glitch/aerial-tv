@@ -1,4 +1,5 @@
 name: LocalSend Android core
+# Build validation for the integrated LocalSend JNI and both Aerial TV variants.
 
 on:
   workflow_dispatch:

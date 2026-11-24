@@ -32,6 +32,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -391,25 +392,27 @@ private fun LocalSendAction(
 /** Official cross-platform download entry; avoids hard-coding one phone CPU architecture. */
 @Composable
 private fun LocalSendInstallQrCard() {
-    val qrBitmap = remember {
-        val matrix = QRCodeWriter().encode(
-            "https://localsend.org/",
-            BarcodeFormat.QR_CODE,
-            280,
-            280,
-            mapOf(
-                EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
-                EncodeHintType.MARGIN to 2,
-            ),
-        )
-        val pixels = IntArray(280 * 280)
-        for (y in 0 until 280) {
-            for (x in 0 until 280) {
-                pixels[y * 280 + x] = if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+    val qrBitmap by produceState<Bitmap?>(initialValue = null) {
+        value = withContext(Dispatchers.Default) {
+            val matrix = QRCodeWriter().encode(
+                "https://localsend.org/",
+                BarcodeFormat.QR_CODE,
+                280,
+                280,
+                mapOf(
+                    EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
+                    EncodeHintType.MARGIN to 2,
+                ),
+            )
+            val pixels = IntArray(280 * 280)
+            for (y in 0 until 280) {
+                for (x in 0 until 280) {
+                    pixels[y * 280 + x] = if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+                }
             }
-        }
-        Bitmap.createBitmap(280, 280, Bitmap.Config.ARGB_8888).apply {
-            setPixels(pixels, 0, 280, 0, 0, 280, 280)
+            Bitmap.createBitmap(280, 280, Bitmap.Config.ARGB_8888).apply {
+                setPixels(pixels, 0, 280, 0, 0, 280, 280)
+            }
         }
     }
 
@@ -421,12 +424,14 @@ private fun LocalSendInstallQrCard() {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(22.dp),
     ) {
-        Image(
-            bitmap = qrBitmap.asImageBitmap(),
-            contentDescription = "LocalSend 官方下载二维码",
-            modifier = Modifier.width(150.dp).height(150.dp)
-                .clip(RoundedCornerShape(8.dp)),
-        )
+        qrBitmap?.let { bitmap ->
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = "LocalSend 官方下载二维码",
+                modifier = Modifier.width(150.dp).height(150.dp)
+                    .clip(RoundedCornerShape(8.dp)),
+            )
+        }
         Column(
             Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(7.dp),
